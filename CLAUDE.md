@@ -11,6 +11,20 @@ A self-hosted reading journal for manga, novels and fanfic, replacing a Discord 
 - `seed.py`: builds sample data in `journal-demo/`.
 - `README.md`: user-facing instructions. Written for a non-programmer; keep it that way.
 
+## App structure
+
+Flask app served by waitress. Server-rendered Jinja templates; plain SQL through `sqlite3`, no ORM. Many rules (progress, search sync, tag cycles) are enforced by triggers in `schema.sql`, not Python.
+
+- `run.py`: entry point. Reads `JOURNAL_DATA`, `JOURNAL_HOST`, `JOURNAL_PORT` and starts waitress. `start.bat` sets up `.venv` and runs it.
+- `journal/__init__.py`: `create_app(data_dir)`. Creates the data folder, runs `init_db`, closes the per-request connection on teardown.
+- `journal/db.py`: `connect()` (the only way to open a connection; turns on foreign keys), `init_db()` (creates the schema, checks `user_version`), `SetupError`.
+- `journal/views.py`: every route, in one blueprint `bp`, plus form parsing and validation. Get the request's connection with `db()`. `/media/<path>` serves images from the data folder.
+- `journal/images.py`: `store_image()`. Validates uploads with Pillow and stores them as `images/<sha[:2]>/<sha>.<ext>`, deduped by hash.
+- `journal/text.py`: Markdown rendering (raw HTML disabled), UTC timestamp helpers, number formatting.
+- `journal/templates/`: Jinja templates. `base.html` is the layout; `_macros.html` holds shared bits.
+- `journal/static/`: `style.css`, `app.js` (optional enhancements; every page works without JS), bundled fonts.
+- `Dockerfile`, `docker-compose.yml`: home server deployment. The data folder is mounted at `/data`.
+
 ## Commands
 
 - Run tests: `python test_schema.py` and `python test_app.py`. Both must report all tests passed.
@@ -23,6 +37,7 @@ A self-hosted reading journal for manga, novels and fanfic, replacing a Discord 
 - When the schema changes, update `002.6 Schema.md` and bump `PRAGMA user_version`. Existing databases need a migration, not a rebuild.
 - Never read from, write to, or delete anything in `journal-data/`. It holds real data. Tests use in-memory databases; demos use `journal-demo/`.
 - Every database connection must run `PRAGMA foreign_keys = ON`.
+- Every database connection must be closed, including in tests and scripts: use `try`/`finally` or the per-request `db()`. Windows won't delete or replace a file that's still open, so a leaked connection breaks cleanup, backups and moves. Close opened files and test responses too.
 - Timestamps are UTC text in exactly `2026-10-18T14:03:00Z` form.
 - Prose fields end in `_md` and hold Markdown. Image paths are relative to the data folder, forward slashes only.
 - Data must stay platform agnostic: Markdown for prose, image files on disk, open formats for everything else.

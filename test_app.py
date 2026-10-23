@@ -1,10 +1,13 @@
 """Tests for the web app. Run with:  python3 test_app.py
 
 Each test starts the app on a fresh temporary data folder and uses it the
-way a browser would (filling in forms, uploading files).
+way a browser would (filling in forms, uploading files). The folder is deleted
+straight after the test; a test that leaves a file in it open fails.
 """
+import gc
 import io
 import re
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -23,8 +26,11 @@ def png(color=(200, 50, 50), size=(40, 60)):
 
 
 class App:
+    instances = []   # deleted by cleanup() after each test
+
     def __init__(self):
         self.tmp = tempfile.TemporaryDirectory()
+        App.instances.append(self)
         self.app = create_app(self.tmp.name, testing=True)
         self.client = self.app.test_client()
 
@@ -50,6 +56,25 @@ class App:
         r = self.client.post(f"/works/{work_id}/entries", data=fields, content_type="multipart/form-data")
         assert r.status_code == expect, (r.status_code, r.get_data(as_text=True)[:2000])
         return r
+
+
+def cleanup(strict=True):
+    """Delete the data folders the last test made.
+
+    On Windows an open database or file can't be deleted, so with strict=True
+    a leftover open handle fails the test instead of leaving the folder behind.
+    """
+    error = None
+    while App.instances:
+        tmp = App.instances.pop().tmp
+        try:
+            tmp.cleanup()
+        except OSError as e:
+            error = error or e
+            gc.collect()   # the leaked handle is garbage once the test returns; free it so the folder still goes
+            shutil.rmtree(tmp.name, ignore_errors=True)
+    if strict and error:
+        raise RuntimeError(f"left a file open in its data folder ({error})")
 
 
 # ---------------------------------------------------------------- works
@@ -364,9 +389,11 @@ if __name__ == "__main__":
     for name, fn in tests:
         try:
             fn()
+            cleanup()
             print(f"PASS  {name}")
         except Exception as e:
             failed += 1
             print(f"FAIL  {name}: {type(e).__name__}: {e}")
+            cleanup(strict=False)
     print(f"\n{len(tests) - failed}/{len(tests)} passed")
     sys.exit(1 if failed else 0)

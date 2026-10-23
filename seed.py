@@ -68,6 +68,14 @@ def main():
         sys.exit("Refusing to seed the real journal-data folder.")
     app = create_app(folder)
     c = connect(app.config["DB_PATH"])
+    try:
+        seed(app, c, folder)
+    finally:
+        c.close()
+    print(f"Seeded {len(WORKS)} sample works into {folder.resolve()}")
+
+
+def seed(app, c, folder):
     if c.execute("SELECT COUNT(*) FROM work").fetchone()[0]:
         sys.exit(f"{folder} already has works; delete the folder to re-seed.")
     data = app.config["DATA_DIR"]
@@ -101,7 +109,6 @@ def main():
                 for n in range(shots):
                     img = store_image(c, data, picture(720, 1000 if n % 2 else 520, b, a, f"p{eid}-{n}"))
                     c.execute("INSERT INTO journal_entry_image VALUES (?,?,?)", (eid, img, n))
-    print(f"Seeded {len(WORKS)} sample works into {folder.resolve()}")
 
 
 if __name__ == "__main__":

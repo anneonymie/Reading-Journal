@@ -78,7 +78,8 @@ def test_add_work_with_everything():
     assert a.one("SELECT external_id FROM work_source_id WHERE source_code = 'mangaupdates'") == "pm5ww2j"
     path = a.one("SELECT i.file_path FROM work w JOIN image i ON i.id = w.cover_image_id")
     assert (Path(a.tmp.name) / path).is_file()
-    assert a.client.get(f"/media/{path}").status_code == 200
+    with a.client.get(f"/media/{path}") as r:   # closing releases the image file
+        assert r.status_code == 200
 
 def test_new_work_logs_initial_status():
     a = App()
@@ -228,7 +229,11 @@ def test_edit_entry_rules():
     img = a.one("SELECT image_id FROM journal_entry_image WHERE entry_id = ?", (eid,))
     a.client.post(f"/entries/{eid}/edit", data={"body": "typo", "progress": "130", "remove_image": str(img),
                                                 "images": [(png((1, 2, 3)), "n.png")]}, content_type="multipart/form-data")
-    rows = a.db().execute("SELECT image_id FROM journal_entry_image WHERE entry_id = ?", (eid,)).fetchall()
+    conn = a.db()
+    try:
+        rows = conn.execute("SELECT image_id FROM journal_entry_image WHERE entry_id = ?", (eid,)).fetchall()
+    finally:
+        conn.close()
     assert len(rows) == 1 and rows[0][0] != img
     # emptying everything is refused
     r = a.client.post(f"/entries/{eid}/edit", data={"body": "", "progress": "",

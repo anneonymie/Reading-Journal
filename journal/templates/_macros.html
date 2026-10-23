@@ -1,0 +1,26 @@
+{% macro local_time(ts) -%}
+<time datetime="{{ ts }}" data-local>{{ ts[:10] }} {{ ts[11:16] }} UTC</time>
+{%- endmacro %}
+
+{% macro progress_text(value, abbrev, total=None) -%}
+{%- if value is not none -%}{{ abbrev }} {{ value|num }}{% if total %} / {{ total|num }}{% endif %}{%- endif -%}
+{%- endmacro %}
+
+{% macro errors_box(errors, conflicts=[]) %}
+{% if errors or conflicts %}
+<div class="errors" role="alert">
+  {% for e in errors %}<p>{{ e }}</p>{% endfor %}
+  {% for prefix, title, wid in conflicts %}
+    <p>{{ prefix }}<a href="{{ url_for('journal.work_page', work_id=wid) }}">{{ title }}</a>.</p>
+  {% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro cover(path, title, cls="cover") %}
+{% if path %}
+  <img class="{{ cls }}" src="{{ url_for('journal.media', rel=path) }}" alt="Cover of {{ title }}" loading="lazy">
+{% else %}
+  <div class="{{ cls }} cover-blank" aria-hidden="true"><span>{{ title }}</span></div>
+{% endif %}
+{% endmacro %}

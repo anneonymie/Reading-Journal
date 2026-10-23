@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_macros.html" import cover, progress_text %}
+{% block title %}Library | Reading Journal{% endblock %}
+{% block content %}
+<div class="library-head">
+  <h1>Library</h1>
+  <nav class="tabs" aria-label="Filter by status">
+    <a href="{{ url_for('journal.library') }}" {% if not status %}aria-current="page"{% endif %}>All <span class="count">{{ total }}</span></a>
+    {% for s in statuses %}
+      <a href="{{ url_for('journal.library', status=s.code) }}" {% if status == s.code %}aria-current="page"{% endif %}>{{ s.label }} <span class="count">{{ counts.get(s.code, 0) }}</span></a>
+    {% endfor %}
+  </nav>
+</div>
+
+{% if works %}
+<ul class="shelf">
+  {% for w in works %}
+  <li>
+    <a class="book" href="{{ url_for('journal.work_page', work_id=w.id) }}">
+      {{ cover(w.cover_path, w.title) }}
+      <span class="book-title">{{ w.title }}</span>
+      <span class="book-meta">
+        {{ w.format_label }}{% if w.progress_current is not none %}, {{ progress_text(w.progress_current, w.unit_abbrev, w.length_total) }}{% endif %}
+      </span>
+      {% if w.status_label %}<span class="status-chip status-{{ w.status_code }}">{{ w.status_label }}</span>{% endif %}
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% elif total %}
+<p class="empty">Nothing is marked {{ (statuses|selectattr('code', 'equalto', status)|first).label }} right now.</p>
+{% else %}
+<div class="empty">
+  <p>Your library is empty. Add the first thing you're reading to start its journal.</p>
+  <a class="button" href="{{ url_for('journal.work_new') }}">Add work</a>
+</div>
+{% endif %}
+{% endblock %}

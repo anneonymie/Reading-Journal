@@ -1,0 +1,8 @@
+# Real and sample data
+journal-data/
+journal-demo/
+
+# Python
+.venv/
+__pycache__/
+*.pyc

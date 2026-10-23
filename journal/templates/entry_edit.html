@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_macros.html" import errors_box %}
+{% block title %}Edit entry | Reading Journal{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<p class="crumb"><a href="{{ url_for('journal.work_page', work_id=entry.work_id) }}#entry-{{ entry.id }}">{{ entry.work_title }}</a></p>
+<h1>Edit entry</h1>
+{{ errors_box(errors) }}
+
+<form method="post" enctype="multipart/form-data" class="stack">
+  {% if entry.kind == 'status' %}
+    <p class="status-line">
+      {% if entry.from_label %}{{ entry.from_label }} to <strong>{{ entry.to_label }}</strong>{% else %}Added as <strong>{{ entry.to_label }}</strong>{% endif %}
+    </p>
+    <p class="hint">This entry is a record of a status change. Editing or deleting it doesn't change the work's status.</p>
+  {% endif %}
+
+  <label class="field">
+    <span>{{ "Comment" if entry.kind == 'status' else "Entry" }}</span>
+    <textarea name="body" rows="6" data-ctrl-enter {% if entry.kind == 'note' %}data-paste-images{% endif %}>{{ form.body }}</textarea>
+  </label>
+
+  {% if entry.kind == 'note' %}
+    {% if images %}
+    <fieldset>
+      <legend>Screenshots</legend>
+      <div class="edit-shots">
+        {% for i in images %}
+          <label class="edit-shot">
+            <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="Screenshot" loading="lazy">
+            <span><input type="checkbox" name="remove_image" value="{{ i.id }}"> Remove</span>
+          </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    {% endif %}
+    <div class="previews" data-previews hidden></div>
+    <label class="attach">
+      <input type="file" name="images" accept="image/*" multiple data-image-input>
+      <span>Add screenshots</span>
+    </label>
+
+    <label class="field short">
+      <span>Progress ({{ entry.entry_unit_plural or entry.series_unit_plural }})</span>
+      <input name="progress" value="{{ form.progress }}" inputmode="decimal" autocomplete="off">
+    </label>
+    {% if entry.progress_value is not none and not entry.progress_valid %}
+      <p class="hint">This entry counts in {{ entry.entry_unit_plural }}, but the work is counted in {{ entry.series_unit_plural }}, so its progress is ignored.</p>
+    {% else %}
+      <p class="hint">If this is farther than the work's current progress, the work moves forward to match.</p>
+    {% endif %}
+  {% endif %}
+
+  <label class="field">
+    <span>Posted at</span>
+    <input name="posted_at" class="js-utc" value="{{ form.posted_at }}" autocomplete="off">
+  </label>
+
+  <div class="actions">
+    <button type="submit">Save changes</button>
+    <a href="{{ url_for('journal.work_page', work_id=entry.work_id) }}#entry-{{ entry.id }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

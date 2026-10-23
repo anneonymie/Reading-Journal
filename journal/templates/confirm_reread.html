@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Start a reread? | Reading Journal{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>Starting a reread of {{ work.title }}?</h1>
+<p>You're moving it from Completed back to Currently Reading. Do you want to reset progress to 0, so your journal entries move it forward again from the start?</p>
+<form method="post" action="{{ url_for('journal.work_status', work_id=work.id) }}" class="actions">
+  <input type="hidden" name="status" value="reading">
+  <button type="submit" name="reset" value="yes">Reset progress to 0</button>
+  <button type="submit" name="reset" value="no" class="secondary">Keep progress</button>
+  <a href="{{ url_for('journal.work_page', work_id=work.id) }}">Cancel</a>
+</form>
+{% endblock %}

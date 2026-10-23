@@ -1,0 +1,9 @@
+services:
+  reading-journal:
+    build: .
+    ports:
+      - "8420:8420"
+    volumes:
+      # Copy your journal-data folder here. Keep it on the server's own disk, not a network share.
+      - ./journal-data:/data
+    restart: unless-stopped

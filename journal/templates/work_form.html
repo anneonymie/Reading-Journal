@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% from "_macros.html" import errors_box, cover %}
+{% block title %}{{ "Edit " ~ work.title if work else "Add work" }} | Reading Journal{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<h1>{{ "Edit " ~ work.title if work else "Add work" }}</h1>
+{{ errors_box(errors, conflicts) }}
+
+<form method="post" enctype="multipart/form-data" class="stack work-form">
+  <label class="field">
+    <span>Title</span>
+    <input name="title" value="{{ form.title }}" required maxlength="300" autocomplete="off">
+  </label>
+
+  <div class="row">
+    <label class="field">
+      <span>Format</span>
+      <select name="format_code" required data-format-select>
+        <option value="" disabled {% if not form.format_code %}selected{% endif %}>Choose…</option>
+        {% for f in formats %}
+          <option value="{{ f.code }}" data-default-unit="{{ f.default_unit }}" {% if form.format_code == f.code %}selected{% endif %}>{{ f.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% if not work %}
+    <label class="field">
+      <span>Status</span>
+      <select name="status">
+        {% for s in statuses %}
+          <option value="{{ s.code }}" {% if form.status == s.code %}selected{% endif %}>{{ s.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+  </div>
+
+  <fieldset>
+    <legend>Length</legend>
+    <p class="hint">Progress in the journal is counted in this unit. Leave the total blank for ongoing series.</p>
+    <div class="row">
+      <label class="field">
+        <span>Unit</span>
+        <select name="length_unit" data-unit-select {% if work %}data-touched{% endif %}>
+          {% for u in units %}
+            <option value="{{ u.code }}" {% if form.length_unit == u.code %}selected{% endif %}>{{ u.plural|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span>Total (optional)</span>
+        <input name="length_total" value="{{ form.length_total }}" inputmode="decimal" autocomplete="off">
+      </label>
+    </div>
+    {% if work %}<p class="hint">Changing the unit clears current progress, and journal entries in the old unit stop counting toward it.</p>{% endif %}
+  </fieldset>
+
+  <fieldset>
+    <legend>Cover</legend>
+    {% if work and work.cover_path %}
+      <div class="cover-current">
+        {{ cover(work.cover_path, work.title, "cover small") }}
+        <label class="check"><input type="checkbox" name="remove_cover" value="1"> Remove this cover</label>
+      </div>
+    {% endif %}
+    <input type="file" name="cover" accept="image/png,image/jpeg,image/gif,image/webp">
+  </fieldset>
+
+  <label class="field">
+    <span>Description</span>
+    <textarea name="description_md" rows="4">{{ form.description_md }}</textarea>
+  </label>
+
+  <div class="row">
+    <label class="field">
+      <span>Authors <small>one per line</small></span>
+      <textarea name="authors" rows="2">{{ form.authors }}</textarea>
+    </label>
+    <label class="field">
+      <span>Artists <small>one per line</small></span>
+      <textarea name="artists" rows="2">{{ form.artists }}</textarea>
+    </label>
+  </div>
+
+  <label class="field">
+    <span>Alternate titles <small>one per line</small></span>
+    <textarea name="alt_titles" rows="2">{{ form.alt_titles }}</textarea>
+  </label>
+
+  <fieldset>
+    <legend>Publication</legend>
+    <div class="row">
+      <label class="field">
+        <span>Publisher</span>
+        <input name="publisher" value="{{ form.publisher }}" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>Publishing status</span>
+        <select name="pub_status">
+          {% for code, label in pub_statuses %}
+            <option value="{{ code }}" {% if form.pub_status == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label class="field">
+        <span>Started</span>
+        <input name="pub_start" value="{{ form.pub_start }}" placeholder="2019 or 2019-04" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>Ended</span>
+        <input name="pub_end" value="{{ form.pub_end }}" placeholder="2023" autocomplete="off">
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Source links</legend>
+    <p class="hint">Paste the work's page link or its ID. Each ID can only belong to one work, which prevents duplicates.</p>
+    {% for s in sources %}
+    <label class="field">
+      <span>{{ s.name }}</span>
+      <input name="src_{{ s.code }}" value="{{ form['src_' ~ s.code] }}" autocomplete="off" spellcheck="false">
+    </label>
+    {% endfor %}
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit">{{ "Save changes" if work else "Add work" }}</button>
+    <a href="{{ url_for('journal.work_page', work_id=work.id) if work else url_for('journal.library') }}">Cancel</a>
+  </div>
+</form>
+
+{% if work %}
+<p class="danger-link"><a href="{{ url_for('journal.work_delete', work_id=work.id) }}">Delete this work…</a></p>
+{% endif %}
+{% endblock %}

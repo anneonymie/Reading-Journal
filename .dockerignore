@@ -1,0 +1,9 @@
+.venv
+journal-data
+journal-demo
+__pycache__
+*.pyc
+test_*.py
+seed.py
+*.md
+*.bat

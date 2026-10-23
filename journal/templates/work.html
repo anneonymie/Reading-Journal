@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% from "_macros.html" import cover, local_time, progress_text, errors_box %}
+{% block title %}{{ work.title }} | Reading Journal{% endblock %}
+{% block content %}
+<article class="work">
+  <header class="work-head">
+    {{ cover(work.cover_path, work.title, "cover large") }}
+    <div class="work-info">
+      <h1>{{ work.title }}</h1>
+      {% if alt_titles %}<p class="alt-titles">{% for t in alt_titles %}<span>{{ t.title }}</span>{% endfor %}</p>{% endif %}
+      <p class="work-meta">
+        {{ work.format_label }}
+        {%- for c in creators %}{% if loop.first %}, by {% elif loop.last %} and {% else %}, {% endif %}{{ c.name }}{% if c.role == 'artist' %} (art){% endif %}{% endfor %}
+      </p>
+      {% if completions > 1 %}<p class="work-meta">Completed {{ completions }} times</p>{% endif %}
+      <a class="edit-link" href="{{ url_for('journal.work_edit', work_id=work.id) }}">Edit details</a>
+    </div>
+  </header>
+
+  {{ errors_box(errors) }}
+
+  <section class="controls" aria-label="Status and progress">
+    <form method="post" action="{{ url_for('journal.work_status', work_id=work.id) }}" class="control">
+      <label for="status">Status</label>
+      <div class="inline">
+        <select id="status" name="status">
+          {% if not work.status_code %}<option value="" selected disabled>None</option>{% endif %}
+          {% for s in statuses %}
+            <option value="{{ s.code }}" {% if work.status_code == s.code %}selected{% endif %}>{{ s.label }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="secondary">Change</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('journal.work_progress', work_id=work.id) }}" class="control">
+      <label for="progress-now">Progress</label>
+      <div class="inline">
+        <span class="unit">{{ work.unit_abbrev }}</span>
+        <input id="progress-now" name="progress" inputmode="decimal" autocomplete="off"
+               value="{{ work.progress_current|num }}">
+        {% if work.length_total %}<span class="unit">of {{ work.length_total|num }}</span>{% endif %}
+        <button type="submit" class="secondary">Set</button>
+      </div>
+      {% if work.length_total and work.progress_current is not none %}
+        {% set pct = [100, (work.progress_current / work.length_total * 100)|round(0, 'floor')]|min %}
+        <div class="meter" role="img" aria-label="{{ pct|int }} percent read"><span style="width: {{ pct }}%"></span></div>
+      {% endif %}
+    </form>
+  </section>
+
+  <details class="panel" {% if work.notes_md %}open{% endif %}>
+    <summary>Notes</summary>
+    <form method="post" action="{{ url_for('journal.work_notes', work_id=work.id) }}" class="stack">
+      <textarea name="notes_md" rows="3" aria-label="Notes" placeholder="Where you're at, what you're feeling about it">{{ work.notes_md or "" }}</textarea>
+      <div class="actions"><button type="submit" class="secondary">Save notes</button></div>
+    </form>
+  </details>
+
+  <details class="panel">
+    <summary>Review{% if work.rating is not none %} <span class="rating">{{ "%.1f"|format(work.rating) }}</span>{% endif %}</summary>
+    {% if work.review_md %}<div class="prose">{{ work.review_md|md }}</div>{% endif %}
+    <form method="post" action="{{ url_for('journal.work_review', work_id=work.id) }}" class="stack">
+      <label class="field short">
+        <span>Rating out of 10</span>
+        <input name="rating" inputmode="decimal" autocomplete="off" placeholder="8.5"
+               value="{{ '%.1f'|format(work.rating) if work.rating is not none else '' }}">
+      </label>
+      <label class="field">
+        <span>Review</span>
+        <textarea name="review_md" rows="4">{{ work.review_md or "" }}</textarea>
+      </label>
+      <div class="actions"><button type="submit" class="secondary">Save review</button></div>
+    </form>
+  </details>
+
+  <details class="panel">
+    <summary>Details</summary>
+    <dl class="facts">
+      {% if work.publisher %}<dt>Publisher</dt><dd>{{ work.publisher }}</dd>{% endif %}
+      {% if work.pub_start or work.pub_end %}<dt>Published</dt><dd>{{ work.pub_start or "?" }}{% if work.pub_end %} to {{ work.pub_end }}{% endif %}</dd>{% endif %}
+      {% if work.pub_status %}<dt>Publishing</dt><dd>{{ work.pub_status|capitalize }}</dd>{% endif %}
+      <dt>Length</dt><dd>{% if work.length_total %}{{ work.length_total|num }} {{ work.unit_plural }}{% else %}Counted in {{ work.unit_plural }}, total unknown{% endif %}</dd>
+      {% for s in work_sources %}
+        <dt>{{ s.name }}</dt><dd><a href="{{ s.url_template.replace('{id}', s.external_id) }}" rel="noreferrer" target="_blank">{{ s.external_id }}</a></dd>
+      {% endfor %}
+    </dl>
+    {% if work.description_md %}<div class="prose">{{ work.description_md|md }}</div>{% endif %}
+  </details>
+
+  <section class="journal" aria-labelledby="journal-heading">
+    <h2 id="journal-heading">Journal</h2>
+    {% if entries %}
+    <ol class="feed">
+      {% for e in entries %}
+      <li id="entry-{{ e.id }}" class="entry {{ 'entry-status' if e.kind == 'status' else '' }}">
+        {% if e.kind == 'status' %}
+          <p class="status-line">
+            {% if e.from_label %}{{ e.from_label }} to <strong>{{ e.to_label }}</strong>{% else %}Added as <strong>{{ e.to_label }}</strong>{% endif %}
+          </p>
+        {% endif %}
+        <div class="entry-meta">
+          {{ local_time(e.posted_at) }}
+          {%- if e.progress_value is not none %}
+            <span class="dot" aria-hidden="true">•</span>
+            <span class="entry-progress {{ 'mismatch' if not e.progress_valid else '' }}">{{ progress_text(e.progress_value, e.entry_unit_abbrev) }}</span>
+            {% if not e.progress_valid %}
+              <details class="why">
+                <summary aria-label="Why this progress doesn't count">?</summary>
+                <p>This entry counts in {{ e.entry_unit_plural }}, but the work is counted in {{ work.unit_plural }}. It's ignored for progress and stats.</p>
+              </details>
+            {% endif %}
+          {% endif %}
+          {% if e.edited_at %}<span class="edited">edited</span>{% endif %}
+          <span class="entry-actions">
+            <a href="{{ url_for('journal.entry_edit', entry_id=e.id) }}">Edit</a>
+            <form method="post" action="{{ url_for('journal.entry_delete', entry_id=e.id) }}"
+                  data-confirm="Delete this entry? {% if e.kind == 'status' %}The status itself won't change.{% else %}Progress on the work won't change.{% endif %}">
+              <button type="submit" class="link">Delete</button>
+            </form>
+          </span>
+        </div>
+        {% if e.body_md %}<div class="prose">{{ e.body_md|md }}</div>{% endif %}
+        {% if images.get(e.id) %}
+          <div class="shots {{ 'single' if images[e.id]|length == 1 else '' }}">
+            {% for i in images[e.id] %}
+              <a href="{{ url_for('journal.media', rel=i.file_path) }}" target="_blank">
+                <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="{{ i.alt_text or 'Screenshot' }}"
+                     loading="lazy" width="{{ i.width }}" height="{{ i.height }}">
+              </a>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="empty">No entries yet. Your first one appears here.</p>
+    {% endif %}
+    <span id="latest"></span>
+
+    <form id="composer" class="composer" method="post" enctype="multipart/form-data"
+          action="{{ url_for('journal.entry_create', work_id=work.id) }}">
+      <label for="body" class="visually-hidden">New entry</label>
+      <textarea id="body" name="body" rows="3" placeholder="What did you think?" data-paste-images data-ctrl-enter>{{ composer.body }}</textarea>
+      <div class="previews" data-previews hidden></div>
+      <div class="composer-bar">
+        <label class="attach">
+          <input type="file" name="images" accept="image/*" multiple data-image-input>
+          <span>Add screenshots</span>
+        </label>
+        <label class="composer-progress">
+          <span>{{ work.unit_abbrev }}</span>
+          <input name="progress" inputmode="decimal" autocomplete="off" value="{{ composer.progress }}" aria-label="Progress in {{ work.unit_plural }}">
+        </label>
+        <button type="submit">Post</button>
+      </div>
+      <details class="when">
+        <summary>Change date</summary>
+        <label class="field">
+          <span>Posted at (leave blank for now)</span>
+          <input name="posted_at" class="js-utc" value="{{ composer.posted_at }}" placeholder="2026-10-17T14:03:00Z" autocomplete="off">
+        </label>
+      </details>
+    </form>
+  </section>
+</article>
+{% endblock %}

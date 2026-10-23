@@ -22,6 +22,9 @@ There is no password, so anyone on your home Wi-Fi who knows the address can ope
 - Back up the `journal-data` folder regularly. It is your whole journal.
 - Copy it only while the journal is stopped.
 - To move the journal to another computer or the home server, stop it and copy the folder.
+- When an update changes how the journal stores your data, it first saves a copy in `journal-data/backups`. Once you're happy the update worked, you can delete old copies to save space.
+- If the journal says your data was last used by a newer version, install that newer version. An older one won't open it, to keep it safe.
+- The version you're running is shown at the bottom of every page. `CHANGELOG.md` lists what changed in each version.
 
 ## Trying it with sample data
 

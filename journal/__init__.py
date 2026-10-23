@@ -7,6 +7,9 @@ from flask import Flask, g
 from . import db as dbmod
 from .text import fmt_num, render_markdown
 
+# The app's release version. Change it only as part of a release (see CLAUDE.md).
+VERSION = "0.1.0"
+
 
 def create_app(data_dir, testing=False):
     data_dir = Path(data_dir).resolve()
@@ -26,6 +29,7 @@ def create_app(data_dir, testing=False):
 
     app.jinja_env.filters["md"] = render_markdown
     app.jinja_env.filters["num"] = fmt_num
+    app.jinja_env.globals["app_version"] = VERSION
 
     @app.teardown_appcontext
     def close_db(_exc):

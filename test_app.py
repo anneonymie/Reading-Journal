@@ -10,11 +10,13 @@ import re
 import shutil
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from PIL import Image
 
-from journal import create_app
+from journal import VERSION, create_app
+from journal import db as dbmod
 from journal.db import connect
 
 
@@ -381,6 +383,112 @@ def test_reopening_existing_data_folder():
     a.add_work(title="Persisted")
     again = create_app(a.tmp.name, testing=True)
     assert "Persisted" in again.test_client().get("/").get_data(as_text=True)
+
+def test_version_in_footer():
+    a = App()
+    assert re.fullmatch(r"\d+\.\d+\.\d+", VERSION)
+    assert re.search(rf'<footer class="site">Reading Journal {re.escape(VERSION)}</footer>',
+                     a.client.get("/").get_data(as_text=True))
+
+# ---------------------------------------------------------------- database upgrades
+
+@contextmanager
+def schema_version(target, migrations):
+    """Pretend the app's schema is at `target`, with these upgrade steps."""
+    saved = dbmod.SCHEMA_VERSION, dbmod.MIGRATIONS
+    dbmod.SCHEMA_VERSION, dbmod.MIGRATIONS = target, migrations
+    try:
+        yield
+    finally:
+        dbmod.SCHEMA_VERSION, dbmod.MIGRATIONS = saved
+
+def refused(a):
+    """Start-up check that must fail; returns the message the person would see."""
+    try:
+        dbmod.init_db(a.app.config["DB_PATH"])
+    except dbmod.SetupError as e:
+        return str(e)
+    raise AssertionError("the journal opened a database it should have refused")
+
+def backups(a):
+    return sorted(Path(a.tmp.name, "backups").glob("*.db"))
+
+def add_shelf(conn):
+    conn.execute("ALTER TABLE work ADD COLUMN shelf TEXT")
+
+def has_shelf(a):
+    return a.one("SELECT COUNT(*) FROM pragma_table_info('work') WHERE name = 'shelf'") == 1
+
+def test_upgrade_backs_up_then_migrates():
+    a = App()
+    a.add_work(title="Before")
+    with schema_version(3, {2: add_shelf}):
+        dbmod.init_db(a.app.config["DB_PATH"])
+    assert a.one("PRAGMA user_version") == 3 and has_shelf(a)
+    [backup] = backups(a)
+    old = connect(backup)
+    try:
+        assert old.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert old.execute("SELECT title FROM work").fetchone()[0] == "Before"
+        assert old.execute("SELECT COUNT(*) FROM pragma_table_info('work') WHERE name = 'shelf'").fetchone()[0] == 0
+    finally:
+        old.close()
+
+def test_upgrade_runs_every_step_in_order():
+    a = App()
+    a.add_work()
+    steps = {2: add_shelf, 3: lambda c: c.execute("UPDATE work SET shelf = 'top'")}
+    with schema_version(4, steps):
+        dbmod.init_db(a.app.config["DB_PATH"])
+    assert a.one("PRAGMA user_version") == 4
+    assert a.one("SELECT shelf FROM work") == "top"
+    assert len(backups(a)) == 1   # one backup per upgrade, not per step
+
+def test_failed_upgrade_changes_nothing():
+    a = App()
+    def broken(conn):
+        add_shelf(conn)
+        raise ValueError("step went wrong")
+    with schema_version(3, {2: broken}):
+        msg = refused(a)
+    [backup] = backups(a)
+    assert "nothing was changed" in msg and "step went wrong" in msg and str(backup) in msg
+    assert a.one("PRAGMA user_version") == 2 and not has_shelf(a)
+    assert a.one("PRAGMA foreign_keys") == 1
+
+def test_upgrade_that_breaks_links_is_undone():
+    a = App()
+    orphan = lambda c: c.execute("INSERT INTO work_creator VALUES (999, 999, 'author')")
+    with schema_version(3, {2: orphan}):
+        msg = refused(a)
+    assert "broken links" in msg
+    assert a.one("PRAGMA user_version") == 2
+    assert a.one("SELECT COUNT(*) FROM work_creator") == 0
+
+def test_newer_database_refused():
+    a = App()
+    conn = a.db()
+    try:
+        conn.execute("PRAGMA user_version = 3")
+    finally:
+        conn.close()
+    msg = refused(a)
+    assert "newer version" in msg
+    assert a.one("PRAGMA user_version") == 3
+    assert backups(a) == []
+
+def test_missing_upgrade_step_refused():
+    a = App()
+    with schema_version(4, {2: add_shelf}):   # no step from 3 to 4
+        msg = refused(a)
+    assert "no upgrade from version 3" in msg
+    assert a.one("PRAGMA user_version") == 2 and not has_shelf(a)
+    assert backups(a) == []
+
+def test_up_to_date_database_not_backed_up():
+    a = App()
+    dbmod.init_db(a.app.config["DB_PATH"])
+    assert backups(a) == []
 
 
 if __name__ == "__main__":

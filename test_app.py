@@ -150,11 +150,14 @@ def test_creator_without_role():
 def test_edit_form_keeps_creators_and_roles():
     a = App()
     wid = a.add_work(creator_name=["Mori", "Asdf"], creator_author=["0"], creator_artist=["0"])
-    rows = re.findall(r'<div class="creator-row".*?</div>', a.client.get(f"/works/{wid}/edit").get_data(as_text=True), re.S)
-    assert len(rows) == 4   # two people, then two blank rows
-    assert 'value="Mori"' in rows[0] and rows[0].count("checked") == 2
+    form = a.client.get(f"/works/{wid}/edit").get_data(as_text=True)
+    shown, spare = form.split("<noscript>")
+    rows = re.findall(r'<div class="creator-row".*?</div>', shown, re.S)
+    assert len(rows) == 2   # just the two people: no blank rows
+    assert 'value="Mori"' in rows[0] and rows[0].count("checked") == 2 and "Role (optional):" in rows[0]
     assert 'value="Asdf"' in rows[1] and "checked" not in rows[1]
-    assert 'value=""' in rows[2] and 'value="2"' in rows[2]   # tick boxes carry the row number
+    # without JavaScript there's no Add button, so one blank row hides in <noscript>
+    assert 'name="creator_name" value=""' in spare and 'value="2"' in spare.split("</noscript>")[0]
     # a role the form doesn't manage, as an import might add
     conn = a.db()
     with conn:
@@ -168,6 +171,12 @@ def test_edit_form_keeps_creators_and_roles():
     assert r.status_code == 302
     assert [tuple(r) for r in creator_roles(a, wid)] == [
         ("Asdf", "unspecified"), ("Kei", "translator"), ("Mori", "author")]
+
+def test_new_work_form_has_one_blank_creator_row():
+    a = App()
+    shown = a.client.get("/works/new").get_data(as_text=True).split("<noscript>")[0]
+    rows = re.findall(r'<div class="creator-row".*?</div>', shown, re.S)
+    assert len(rows) == 1 and 'value=""' in rows[0]
 
 def test_creators_kept_when_form_has_errors():
     a = App()

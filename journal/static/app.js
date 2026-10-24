@@ -67,7 +67,7 @@
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary";
-    button.textContent = "Add another creator";
+    button.textContent = "+ Add another creator";
     button.addEventListener("click", () => {
       const rows = set.querySelectorAll("[data-creator-row]");
       const row = rows[rows.length - 1].cloneNode(true);

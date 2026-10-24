@@ -31,7 +31,7 @@
 <p class="empty">Nothing is marked {{ (statuses|selectattr('code', 'equalto', status)|first).label }} right now.</p>
 {% else %}
 <div class="empty">
-  <p>Your library is empty. Add the first thing you're reading to start its journal.</p>
+  <p>You don't have any works in your journal. Click the Add Work button to add one.</p>
   <a class="button" href="{{ url_for('journal.work_new') }}">Add work</a>
 </div>
 {% endif %}

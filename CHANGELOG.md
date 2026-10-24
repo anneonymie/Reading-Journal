@@ -16,5 +16,6 @@ The first numbered version of the journal. It can already:
 New in this version:
 
 - The version number is shown at the bottom of every page.
+- A clearer message when your library has no works yet.
 - Safer updates. When a new version of the journal needs to change how your data is stored, it first saves a copy of your journal in `journal-data/backups`, then updates it automatically. If anything goes wrong, your journal is left exactly as it was.
 - If your journal was last opened by a newer version of the app, an older version refuses to open it rather than risk damaging it.

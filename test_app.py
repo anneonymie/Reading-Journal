@@ -371,6 +371,11 @@ def test_library_filter():
     page = a.client.get("/?status=paused").get_data(as_text=True)
     assert "Paused one" in page and "Reading one" not in page
 
+def test_empty_library_message():
+    a = App()
+    assert "You don't have any works in your journal. Click the Add Work button to add one." in \
+        a.client.get("/").get_data(as_text=True)
+
 def test_media_cannot_escape_data_folder():
     a = App()
     for url in ("/media/journal.db", "/media/images/../journal.db", "/media/images/%2e%2e/journal.db",

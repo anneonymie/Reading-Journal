@@ -15,7 +15,8 @@ The first numbered version of the journal. It can already:
 
 New in this version:
 
-- The version number is shown at the bottom of every page.
+- A notebook logo at the top of every page and on the browser tab.
+- A footer on every page with links to the library, Add Work and this changelog, plus the version number.
 - A clearer message when your library has no works yet, with a pointer to how to bring in an existing journal.
 - Step-by-step instructions in the README for restoring a backup and moving your journal to a new computer.
 - Safer updates. When a new version of the journal needs to change how your data is stored, it first saves a copy of your journal in `journal-data/backups`, then updates it automatically. If anything goes wrong, your journal is left exactly as it was.

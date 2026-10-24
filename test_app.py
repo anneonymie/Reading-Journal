@@ -391,11 +391,27 @@ def test_reopening_existing_data_folder():
     again = create_app(a.tmp.name, testing=True)
     assert "Persisted" in again.test_client().get("/").get_data(as_text=True)
 
-def test_version_in_footer():
+def test_footer_version_links_and_credit():
     a = App()
     assert re.fullmatch(r"\d+\.\d+\.\d+", VERSION)
-    assert re.search(rf'<footer class="site">Reading Journal {re.escape(VERSION)}</footer>',
-                     a.client.get("/").get_data(as_text=True))
+    footer = re.search(r'<footer class="site">(.*?)</footer>', a.client.get("/").get_data(as_text=True), re.S).group(1)
+    assert f"Reading Journal {VERSION}" in footer
+    for href in ('href="/"', 'href="/works/new"', 'href="/changelog"',
+                 'href="https://creativecommons.org/licenses/by/4.0/"'):
+        assert href in footer, href
+    assert "EmojiOne" in footer
+
+def test_changelog_page():
+    a = App()
+    r = a.client.get("/changelog")
+    page = r.get_data(as_text=True)
+    assert r.status_code == 200 and "<h1>Changelog</h1>" in page and "Unreleased" in page
+
+def test_logo_served():
+    a = App()
+    r = a.client.get("/static/emojione-notebook.svg")
+    assert r.status_code == 200 and r.mimetype == "image/svg+xml"
+    r.close()
 
 # ---------------------------------------------------------------- database upgrades
 

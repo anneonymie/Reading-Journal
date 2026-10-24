@@ -3,6 +3,7 @@ import math
 import re
 import sqlite3
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from flask import (Blueprint, abort, current_app, flash, g, redirect, render_template,
                    request, send_from_directory, url_for)
@@ -586,6 +587,14 @@ def entry_delete(entry_id):
 
 
 # ------------------------------------------------------------------ files
+
+CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
+
+
+@bp.get("/changelog")
+def changelog():
+    return render_template("changelog.html", text=CHANGELOG_PATH.read_text(encoding="utf-8"))
+
 
 @bp.get("/media/<path:rel>")
 def media(rel):

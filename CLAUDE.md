@@ -10,7 +10,7 @@ A self-hosted reading journal for manga, novels and fanfic, replacing a Discord 
 - `test_schema.py`, `test_app.py`: tests for every rule in the requirements.
 - `seed.py`: builds sample data in `journal-demo/`.
 - `README.md`: user-facing instructions. Written for a non-programmer; keep it that way.
-- `CHANGELOG.md`: what changed in each release, also written for a non-programmer.
+- `CHANGELOG.md`: what changed in each release, also written for a non-programmer. The app shows it at `/changelog`, so the Docker image includes it.
 
 ## App structure
 
@@ -22,8 +22,8 @@ Flask app served by waitress. Server-rendered Jinja templates; plain SQL through
 - `journal/views.py`: every route, in one blueprint `bp`, plus form parsing and validation. Get the request's connection with `db()`. `/media/<path>` serves images from the data folder.
 - `journal/images.py`: `store_image()`. Validates uploads with Pillow and stores them as `images/<sha[:2]>/<sha>.<ext>`, deduped by hash.
 - `journal/text.py`: Markdown rendering (raw HTML disabled), UTC timestamp helpers, number formatting.
-- `journal/templates/`: Jinja templates. `base.html` is the layout; `_macros.html` holds shared bits.
-- `journal/static/`: `style.css`, `app.js` (optional enhancements; every page works without JS), bundled fonts.
+- `journal/templates/`: Jinja templates. `base.html` is the layout (header, footer with links, version and logo credit); `_macros.html` holds shared bits.
+- `journal/static/`: `style.css`, `app.js` (optional enhancements; every page works without JS), bundled fonts, `emojione-notebook.svg` (logo and tab icon; CC BY 4.0, so the footer credit must stay).
 - `Dockerfile`, `docker-compose.yml`: home server deployment. The data folder is mounted at `/data`.
 
 ## Commands

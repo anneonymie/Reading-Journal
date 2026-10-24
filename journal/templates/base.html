@@ -4,12 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Reading Journal{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='emojione-notebook.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
 <body>
   <header class="site">
-    <a class="brand" href="{{ url_for('journal.library') }}">Reading Journal</a>
+    <a class="brand" href="{{ url_for('journal.library') }}">
+      <img src="{{ url_for('static', filename='emojione-notebook.svg') }}" alt="" width="28" height="28">Reading Journal
+    </a>
     <nav>
       <a href="{{ url_for('journal.library') }}">Library</a>
       <a class="button small" href="{{ url_for('journal.work_new') }}">Add Work</a>
@@ -23,6 +26,15 @@
   <main class="{% block main_class %}{% endblock %}">
     {% block content %}{% endblock %}
   </main>
-  <footer class="site">Reading Journal {{ app_version }}</footer>
+  <footer class="site">
+    <nav aria-label="Footer">
+      <a href="{{ url_for('journal.library') }}">Library</a>
+      <a href="{{ url_for('journal.work_new') }}">Add Work</a>
+      <a href="{{ url_for('journal.changelog') }}">Changelog</a>
+    </nav>
+    <p>Reading Journal {{ app_version }}</p>
+    <p>Notebook logo by <a href="https://github.com/joypixels/emojione">EmojiOne</a>,
+       licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a></p>
+  </footer>
 </body>
 </html>

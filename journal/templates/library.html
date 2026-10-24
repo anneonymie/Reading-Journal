@@ -31,8 +31,8 @@
 <p class="empty">Nothing is marked {{ (statuses|selectattr('code', 'equalto', status)|first).label }} right now.</p>
 {% else %}
 <div class="empty">
-  <p>You don't have any works in your journal. Click the Add Work button to add one.</p>
-  <a class="button" href="{{ url_for('journal.work_new') }}">Add work</a>
+  <p>You don't have any works in your journal. Use the Add Work button to add one.</p>
+  <a class="button" href="{{ url_for('journal.work_new') }}">Add Work</a>
 </div>
 {% endif %}
 {% endblock %}

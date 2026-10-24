@@ -126,7 +126,7 @@
   </fieldset>
 
   <div class="actions">
-    <button type="submit">{{ "Save changes" if work else "Add work" }}</button>
+    <button type="submit">{{ "Save changes" if work else "Add Work" }}</button>
     <a href="{{ url_for('journal.work_page', work_id=work.id) if work else url_for('journal.library') }}">Cancel</a>
   </div>
 </form>

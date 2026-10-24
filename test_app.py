@@ -373,8 +373,9 @@ def test_library_filter():
 
 def test_empty_library_message():
     a = App()
-    assert "You don't have any works in your journal. Click the Add Work button to add one." in \
-        a.client.get("/").get_data(as_text=True)
+    page = a.client.get("/").get_data(as_text=True)
+    assert "You don't have any works in your journal. Use the Add Work button to add one." in page
+    assert ">Add Work</a>" in page
 
 def test_media_cannot_escape_data_folder():
     a = App()

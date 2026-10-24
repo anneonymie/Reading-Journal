@@ -3,6 +3,8 @@ Updates to the Reading Journal app. The current app version appears at the botto
 
 ## Unreleased
 
+- The changelog page no longer shows an empty "Unreleased" section when there's nothing new yet.
+
 ## 0.1.0 (2026-10-23)
 
 The first numbered version of the journal. It can already:

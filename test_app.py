@@ -405,7 +405,15 @@ def test_changelog_page():
     a = App()
     r = a.client.get("/changelog")
     page = r.get_data(as_text=True)
-    assert r.status_code == 200 and "<h1>Changelog</h1>" in page and "Unreleased" in page
+    assert r.status_code == 200 and "<h1>Changelog</h1>" in page and "<h2>0.1.0" in page
+
+def test_changelog_hides_empty_unreleased():
+    from journal.views import hide_empty_unreleased
+    empty = "# Changelog\n\n## Unreleased\n\n## 0.2.0 (2027-01-01)\n\n- Thing\n"
+    assert hide_empty_unreleased(empty) == "# Changelog\n\n## 0.2.0 (2027-01-01)\n\n- Thing\n"
+    assert hide_empty_unreleased("# Changelog\n\n## Unreleased\n") == "# Changelog\n\n"
+    filled = "# Changelog\n\n## Unreleased\n\n- New thing\n\n## 0.2.0 (2027-01-01)\n"
+    assert hide_empty_unreleased(filled) == filled
 
 def test_logo_served():
     a = App()

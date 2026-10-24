@@ -591,9 +591,15 @@ def entry_delete(entry_id):
 CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 
 
+def hide_empty_unreleased(text):
+    """Drop the "Unreleased" heading when nothing has been added under it yet."""
+    return re.sub(r"^## Unreleased\s*(?=^## |\Z)", "", text, flags=re.M)
+
+
 @bp.get("/changelog")
 def changelog():
-    return render_template("changelog.html", text=CHANGELOG_PATH.read_text(encoding="utf-8"))
+    text = hide_empty_unreleased(CHANGELOG_PATH.read_text(encoding="utf-8"))
+    return render_template("changelog.html", text=text)
 
 
 @bp.get("/media/<path:rel>")

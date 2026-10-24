@@ -1,8 +1,9 @@
 # Changelog
-
-What changed in each version of the Reading Journal, newest first. The version you're running is shown at the bottom of every page.
+Updates to the Reading Journal app. The current app version appears at the bottom of each page. And yes, this too is yaoi. 🍋
 
 ## Unreleased
+
+## 0.1.0 (2026-10-23)
 
 The first numbered version of the journal. It can already:
 

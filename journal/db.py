@@ -8,13 +8,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MIN_SQLITE = (3, 43, 0)
+
+
+def _v2_to_v3(conn):
+    # Editing a journal entry no longer moves the series' progress.
+    conn.execute("DROP TRIGGER journal_progress_after_update")
+
 
 # Upgrade steps: MIGRATIONS[n](conn) takes a database from version n to n + 1.
 # All steps run in one transaction, so they must use conn.execute(), never
 # conn.executescript(), which commits part-way through.
-MIGRATIONS = {}
+# old_schemas/ keeps each earlier schema.sql so tests can upgrade a real old database.
+MIGRATIONS = {2: _v2_to_v3}
 
 
 class SetupError(RuntimeError):

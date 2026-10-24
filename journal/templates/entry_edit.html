@@ -47,7 +47,7 @@
     {% if entry.progress_value is not none and not entry.progress_valid %}
       <p class="hint">This entry counts in {{ entry.entry_unit_plural }}, but the work is counted in {{ entry.series_unit_plural }}, so its progress is ignored.</p>
     {% else %}
-      <p class="hint">If this is farther than the work's current progress, the work moves forward to match.</p>
+      <p class="hint">Editing an entry doesn't change the work's progress. To change that, use Progress on the work's page.</p>
     {% endif %}
   {% endif %}
 

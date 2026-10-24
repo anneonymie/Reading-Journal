@@ -282,6 +282,10 @@ def add_status_change(c, work_id, old, new, when=None):
                    (work_id, new, when)).lastrowid
     c.execute("""INSERT INTO journal_entry(work_id, kind, posted_at, status_event_id, status_from, status_to)
                  VALUES (?, 'status', ?, ?, ?, ?)""", (work_id, when, ev, old, new))
+    if new == "completed":
+        # Finishing means all of it has been read; with no total there's nothing to fill in.
+        c.execute("UPDATE work SET progress_current = length_total WHERE id = ? AND length_total IS NOT NULL",
+                  (work_id,))
 
 
 @bp.route("/works/new", methods=["GET", "POST"])

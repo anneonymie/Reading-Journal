@@ -113,14 +113,21 @@ def test_progress_never_moves_backward():
     add_entry(db, value=3, unit="chapter")
     assert one(db, "SELECT progress_current FROM work WHERE id = 1") == 10
 
-def test_progress_edit_counts_like_create():
+def test_progress_edit_does_nothing():
     db = new_db()
     add_entry(db, value=5, unit="chapter")
     e = add_entry(db, value=2, unit="chapter")
-    db.execute("UPDATE journal_entry SET progress_value = 22 WHERE id = ?", (e,))
-    assert one(db, "SELECT progress_current FROM work WHERE id = 1") == 22
-    db.execute("UPDATE journal_entry SET progress_value = 1 WHERE id = ?", (e,))   # editing down: no change
-    assert one(db, "SELECT progress_current FROM work WHERE id = 1") == 22
+    db.execute("UPDATE journal_entry SET progress_value = 22 WHERE id = ?", (e,))   # editing up: no change
+    assert one(db, "SELECT progress_current FROM work WHERE id = 1") == 5
+    db.execute("UPDATE journal_entry SET progress_value = 1 WHERE id = ?", (e,))    # editing down: no change
+    assert one(db, "SELECT progress_current FROM work WHERE id = 1") == 5
+
+def test_progress_edit_during_reread_does_nothing():
+    db = new_db()
+    e = add_entry(db, value=64, unit="chapter")
+    db.execute("UPDATE work SET progress_current = 0 WHERE id = 1")      # reread reset
+    db.execute("UPDATE journal_entry SET progress_value = 65 WHERE id = ?", (e,))   # correcting an old entry
+    assert one(db, "SELECT progress_current FROM work WHERE id = 1") == 0
 
 def test_progress_resave_without_change_does_nothing():
     db = new_db()
@@ -384,7 +391,7 @@ def test_integrity():
     db = new_db()
     assert one(db, "PRAGMA integrity_check") == "ok"
     assert db.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert one(db, "PRAGMA user_version") == 2
+    assert one(db, "PRAGMA user_version") == 3
 
 
 if __name__ == "__main__":

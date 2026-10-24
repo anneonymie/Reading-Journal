@@ -323,23 +323,13 @@ SELECT je.id AS entry_id,
 FROM journal_entry je
 JOIN work w ON w.id = je.work_id;
 
--- One-time progress update: creating or editing an entry so its progress
--- is farther along (same unit) moves the series forward. Deleting does nothing.
+-- One-time progress update: creating an entry whose progress is farther
+-- along (same unit) moves the series forward. Editing or deleting an entry
+-- does nothing: the journal is a log, so an old entry edited during a reread
+-- can't jump the series ahead.
 CREATE TRIGGER journal_progress_after_insert
 AFTER INSERT ON journal_entry
 WHEN NEW.progress_value IS NOT NULL
-BEGIN
-    UPDATE work
-    SET progress_current = NEW.progress_value
-    WHERE id = NEW.work_id
-      AND length_unit = NEW.progress_unit
-      AND (progress_current IS NULL OR progress_current < NEW.progress_value);
-END;
-
-CREATE TRIGGER journal_progress_after_update
-AFTER UPDATE OF progress_value, progress_unit ON journal_entry
-WHEN NEW.progress_value IS NOT NULL
- AND (NEW.progress_value IS NOT OLD.progress_value OR NEW.progress_unit IS NOT OLD.progress_unit)
 BEGIN
     UPDATE work
     SET progress_current = NEW.progress_value
@@ -646,4 +636,4 @@ CREATE TABLE app_setting (
 ) STRICT;
 
 -- Schema version, for future migrations
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;

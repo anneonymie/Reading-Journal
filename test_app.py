@@ -27,12 +27,24 @@ def png(color=(200, 50, 50), size=(40, 60)):
     return buf
 
 
+OLD_SCHEMAS = Path(__file__).parent / "old_schemas"
+
+
 class App:
     instances = []   # deleted by cleanup() after each test
 
-    def __init__(self):
+    def __init__(self, old_schema=None, before=None):
         self.tmp = tempfile.TemporaryDirectory()
         App.instances.append(self)
+        if old_schema:   # start from a journal made by an earlier release, with before(conn) adding data
+            conn = connect(Path(self.tmp.name) / "journal.db")
+            try:
+                conn.executescript((OLD_SCHEMAS / old_schema).read_text(encoding="utf-8"))
+                if before:
+                    before(conn)
+                conn.commit()
+            finally:
+                conn.close()
         self.app = create_app(self.tmp.name, testing=True)
         self.client = self.app.test_client()
 
@@ -342,9 +354,10 @@ def test_edit_entry_rules():
     assert r.status_code == 302
     assert a.one("SELECT progress_current FROM work WHERE id = ?", (wid,)) == 0
     assert a.one("SELECT edited_at IS NOT NULL FROM journal_entry WHERE id = ?", (eid,)) == 1
-    # raising progress in an edit moves the work forward
+    # raising progress in an edit doesn't move the work either: the journal is a log
     a.client.post(f"/entries/{eid}/edit", data={"body": "typo", "progress": "130"}, content_type="multipart/form-data")
-    assert a.one("SELECT progress_current FROM work WHERE id = ?", (wid,)) == 130
+    assert a.one("SELECT progress_value FROM journal_entry WHERE id = ?", (eid,)) == 130
+    assert a.one("SELECT progress_current FROM work WHERE id = ?", (wid,)) == 0
     # removing the image and adding another
     img = a.one("SELECT image_id FROM journal_entry_image WHERE entry_id = ?", (eid,))
     a.client.post(f"/entries/{eid}/edit", data={"body": "typo", "progress": "130", "remove_image": str(img),
@@ -388,6 +401,21 @@ def test_status_change_logs_entry():
     a.client.post(f"/works/{wid}/status", data={"status": "paused"})
     assert a.one("SELECT status_code FROM work_current_status WHERE work_id = ?", (wid,)) == "paused"
     assert a.one("SELECT status_from || '>' || status_to FROM journal_entry WHERE kind = 'status' ORDER BY id DESC") == "reading>paused"
+
+def test_completed_fills_in_progress():
+    a = App()
+    wid = a.add_work(length_total="64")
+    a.post_entry(wid, body="x", progress="30")
+    a.client.post(f"/works/{wid}/status", data={"status": "completed"})
+    assert a.one("SELECT progress_current FROM work WHERE id = ?", (wid,)) == 64
+    # with no total, completing leaves progress alone
+    ongoing = a.add_work(title="Ongoing")
+    a.post_entry(ongoing, body="x", progress="12")
+    a.client.post(f"/works/{ongoing}/status", data={"status": "completed"})
+    assert a.one("SELECT progress_current FROM work WHERE id = ?", (ongoing,)) == 12
+    # adding a work as Completed fills it in too
+    done = a.add_work(title="Done", status="completed", length_total="10")
+    assert a.one("SELECT progress_current FROM work WHERE id = ?", (done,)) == 10
 
 def test_same_status_does_nothing():
     a = App()
@@ -543,16 +571,19 @@ def add_shelf(conn):
 def has_shelf(a):
     return a.one("SELECT COUNT(*) FROM pragma_table_info('work') WHERE name = 'shelf'") == 1
 
+# The safety tests below pretend the app has moved past the real current version V.
+V = dbmod.SCHEMA_VERSION
+
 def test_upgrade_backs_up_then_migrates():
     a = App()
     a.add_work(title="Before")
-    with schema_version(3, {2: add_shelf}):
+    with schema_version(V + 1, {V: add_shelf}):
         dbmod.init_db(a.app.config["DB_PATH"])
-    assert a.one("PRAGMA user_version") == 3 and has_shelf(a)
+    assert a.one("PRAGMA user_version") == V + 1 and has_shelf(a)
     [backup] = backups(a)
     old = connect(backup)
     try:
-        assert old.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert old.execute("PRAGMA user_version").fetchone()[0] == V
         assert old.execute("SELECT title FROM work").fetchone()[0] == "Before"
         assert old.execute("SELECT COUNT(*) FROM pragma_table_info('work') WHERE name = 'shelf'").fetchone()[0] == 0
     finally:
@@ -561,10 +592,10 @@ def test_upgrade_backs_up_then_migrates():
 def test_upgrade_runs_every_step_in_order():
     a = App()
     a.add_work()
-    steps = {2: add_shelf, 3: lambda c: c.execute("UPDATE work SET shelf = 'top'")}
-    with schema_version(4, steps):
+    steps = {V: add_shelf, V + 1: lambda c: c.execute("UPDATE work SET shelf = 'top'")}
+    with schema_version(V + 2, steps):
         dbmod.init_db(a.app.config["DB_PATH"])
-    assert a.one("PRAGMA user_version") == 4
+    assert a.one("PRAGMA user_version") == V + 2
     assert a.one("SELECT shelf FROM work") == "top"
     assert len(backups(a)) == 1   # one backup per upgrade, not per step
 
@@ -573,41 +604,63 @@ def test_failed_upgrade_changes_nothing():
     def broken(conn):
         add_shelf(conn)
         raise ValueError("step went wrong")
-    with schema_version(3, {2: broken}):
+    with schema_version(V + 1, {V: broken}):
         msg = refused(a)
     [backup] = backups(a)
     assert "nothing was changed" in msg and "step went wrong" in msg and str(backup) in msg
-    assert a.one("PRAGMA user_version") == 2 and not has_shelf(a)
+    assert a.one("PRAGMA user_version") == V and not has_shelf(a)
     assert a.one("PRAGMA foreign_keys") == 1
 
 def test_upgrade_that_breaks_links_is_undone():
     a = App()
     orphan = lambda c: c.execute("INSERT INTO work_creator VALUES (999, 999, 'author')")
-    with schema_version(3, {2: orphan}):
+    with schema_version(V + 1, {V: orphan}):
         msg = refused(a)
     assert "broken links" in msg
-    assert a.one("PRAGMA user_version") == 2
+    assert a.one("PRAGMA user_version") == V
     assert a.one("SELECT COUNT(*) FROM work_creator") == 0
 
 def test_newer_database_refused():
     a = App()
     conn = a.db()
     try:
-        conn.execute("PRAGMA user_version = 3")
+        conn.execute(f"PRAGMA user_version = {V + 1}")
     finally:
         conn.close()
     msg = refused(a)
     assert "newer version" in msg
-    assert a.one("PRAGMA user_version") == 3
+    assert a.one("PRAGMA user_version") == V + 1
     assert backups(a) == []
 
 def test_missing_upgrade_step_refused():
     a = App()
-    with schema_version(4, {2: add_shelf}):   # no step from 3 to 4
+    with schema_version(V + 2, {V: add_shelf}):   # no step from V + 1 to V + 2
         msg = refused(a)
-    assert "no upgrade from version 3" in msg
-    assert a.one("PRAGMA user_version") == 2 and not has_shelf(a)
+    assert f"no upgrade from version {V + 1}" in msg
+    assert a.one("PRAGMA user_version") == V and not has_shelf(a)
     assert backups(a) == []
+
+def test_upgrade_from_v2_journal():
+    def old_data(conn):
+        conn.execute("INSERT INTO work(id, title, format_code) VALUES (1, 'Old Work', 'manga')")
+        conn.execute("INSERT INTO journal_entry(work_id, body_md, progress_value, progress_unit) VALUES (1, 'old', 64, 'chapter')")
+    a = App(old_schema="schema_v2.sql", before=old_data)   # starting the app upgrades it
+    assert a.one("PRAGMA user_version") == V and len(backups(a)) == 1
+    assert a.one("SELECT progress_current FROM work WHERE id = 1") == 64   # data kept
+    # the upgraded journal has the same tables, views and triggers as a brand-new one
+    objects = "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY 1, 2"
+    fresh = App()
+    conn, new_conn = a.db(), fresh.db()
+    try:
+        assert conn.execute(objects).fetchall() == new_conn.execute(objects).fetchall()
+    finally:
+        conn.close()
+        new_conn.close()
+    # v3 rule: correcting an old entry during a reread leaves progress alone
+    a.client.post("/works/1/progress", data={"progress": "0"})
+    eid = a.one("SELECT id FROM journal_entry WHERE body_md = 'old'")
+    a.client.post(f"/entries/{eid}/edit", data={"body": "old", "progress": "65"}, content_type="multipart/form-data")
+    assert a.one("SELECT progress_current FROM work WHERE id = 1") == 0
 
 def test_up_to_date_database_not_backed_up():
     a = App()

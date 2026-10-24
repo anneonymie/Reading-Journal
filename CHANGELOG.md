@@ -7,7 +7,7 @@ What changed in each version of the Reading Journal, newest first. The version y
 The first numbered version of the journal. It can already:
 
 - Keep a library of manga, novels and fanfic, with covers, authors and artists, other titles, and links to AniList, MangaUpdates and AO3.
-- Hold a journal for each work: posts written in Markdown, with screenshots and how far you've read.
+- Hold a journal for each work: posts written in Markdown, with images and how far you've read.
 - Track your reading status (reading, paused, completed and so on), with a choice to reset progress when you start a reread.
 - Store a rating, a review and private notes for each work.
 - Filter the library by status.

@@ -23,7 +23,7 @@ def create_app(data_dir, testing=False):
         DATA_DIR=str(data_dir),
         DB_PATH=str(db_path),
         TESTING=testing,
-        MAX_CONTENT_LENGTH=200 * 1024 * 1024,   # one post with many screenshots
+        MAX_CONTENT_LENGTH=200 * 1024 * 1024,   # one post with many images
         SECRET_KEY=_secret_key(db_path),
     )
 

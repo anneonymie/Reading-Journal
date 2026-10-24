@@ -1,6 +1,6 @@
 # Reading Journal
 
-A personal reading journal you run yourself. Everything lives in one folder, `journal-data`: the database (`journal.db`) and your screenshots (`images/`).
+A personal reading journal you run yourself. Everything lives in one folder, `journal-data`: the database (`journal.db`) and your images (`images/`).
 
 ## Running it on Windows
 

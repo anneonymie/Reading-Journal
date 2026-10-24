@@ -3,7 +3,7 @@
 {% block main_class %}narrow{% endblock %}
 {% block content %}
 <h1>Delete {{ work.title }}?</h1>
-<p>This permanently deletes the work, its status history, and its {{ entry_count }} journal {{ "entry" if entry_count == 1 else "entries" }}. Screenshot files stay in your images folder. This can't be undone.</p>
+<p>This permanently deletes the work, its status history, and its {{ entry_count }} journal {{ "entry" if entry_count == 1 else "entries" }}. Its image files, including the cover, stay in your images folder. This can't be undone.</p>
 <form method="post" class="actions">
   <button type="submit" class="danger">Delete permanently</button>
   <a href="{{ url_for('journal.work_edit', work_id=work.id) }}">Cancel</a>

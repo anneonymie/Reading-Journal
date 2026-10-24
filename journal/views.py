@@ -484,7 +484,7 @@ def entry_create(work_id):
     posted_at = read_posted_at(errors)
     uploads = [u for u in request.files.getlist("images") if u and u.filename]
     if not errors and not body and not uploads and progress is None:
-        errors.append("Write something, add a screenshot or record your progress.")
+        errors.append("Write something, add an image or record your progress.")
     if errors:
         return render_work(work_id, composer=composer, errors=errors, status=400)
     c = db()
@@ -499,7 +499,7 @@ def entry_create(work_id):
             attach_images(c, entry_id, uploads)
     except ImageError as e:
         return render_work(work_id, composer=composer,
-                           errors=[f"{e} Nothing was posted; attach the screenshots again."], status=400)
+                           errors=[f"{e} Nothing was posted; attach the images again."], status=400)
     return redirect(url_for(".work_page", work_id=work_id) + f"#entry-{entry_id}")
 
 
@@ -548,7 +548,7 @@ def entry_edit(entry_id):
     uploads = [u for u in request.files.getlist("images") if u and u.filename] if is_note else []
     kept = [i for i in imgs if i["id"] not in remove]
     if is_note and not errors and not body and not kept and not uploads and progress is None:
-        errors.append("An entry needs text, a screenshot or progress. To remove it entirely, use Delete.")
+        errors.append("An entry needs text, an image or progress. To remove it entirely, use Delete.")
     if errors:
         return render_template("entry_edit.html", entry=entry, images=imgs, form=form, errors=errors), 400
 
@@ -607,7 +607,7 @@ def not_found(_e):
 @bp.app_errorhandler(413)
 def too_large(_e):
     return render_template("message.html", title="Upload too large",
-                           message="That upload is over 200 MB in total. Post fewer screenshots at once."), 413
+                           message="That upload is over 200 MB in total. Post fewer images at once."), 413
 
 
 @bp.app_errorhandler(sqlite3.IntegrityError)

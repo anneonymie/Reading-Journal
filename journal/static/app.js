@@ -62,7 +62,7 @@
     apply();
   }
 
-  // Screenshots: paste, drop or pick; preview them and allow removal before posting.
+  // Images: paste, drop or pick; preview them and allow removal before posting.
   document.querySelectorAll("input[data-image-input]").forEach((input) => {
     const form = input.form;
     const previews = form.querySelector("[data-previews]");
@@ -85,13 +85,13 @@
         box.className = "preview";
         const img = document.createElement("img");
         img.src = URL.createObjectURL(file);
-        img.alt = file.name || "Screenshot";
+        img.alt = file.name || "Image";
         box.appendChild(img);
         if (canSet) {
           const remove = document.createElement("button");
           remove.type = "button";
           remove.textContent = "×";
-          remove.setAttribute("aria-label", `Remove ${file.name || "screenshot"}`);
+          remove.setAttribute("aria-label", `Remove ${file.name || "image"}`);
           remove.addEventListener("click", () => { files.splice(index, 1); sync(); });
           box.appendChild(remove);
         }

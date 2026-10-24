@@ -176,7 +176,7 @@ def test_delete_work():
 
 # ---------------------------------------------------------------- journal
 
-def test_post_entry_with_screenshots_and_progress():
+def test_post_entry_with_images_and_progress():
     a = App()
     wid = a.add_work()
     a.post_entry(wid, body="Chapter **one**", progress="1", images=[(png(), "a.png"), (png((0, 0, 255)), "b.png")])
@@ -185,7 +185,7 @@ def test_post_entry_with_screenshots_and_progress():
     page = a.client.get(f"/works/{wid}").get_data(as_text=True)
     assert "<strong>one</strong>" in page and "Ch 1" in page
 
-def test_same_screenshot_stored_once():
+def test_same_image_stored_once():
     a = App()
     wid = a.add_work()
     a.post_entry(wid, images=[(png(), "a.png")])
@@ -207,7 +207,7 @@ def test_bad_progress_keeps_text():
     assert "Progress must be a number" in body and "my thoughts" in body
     assert a.one("SELECT COUNT(*) FROM journal_entry WHERE kind = 'note'") == 0
 
-def test_bad_screenshot_posts_nothing():
+def test_bad_image_posts_nothing():
     a = App()
     wid = a.add_work()
     r = a.post_entry(wid, expect=400, body="keep", images=[(png(), "ok.png"), (io.BytesIO(b"junk"), "bad.png")])
@@ -252,7 +252,7 @@ def test_edit_entry_rules():
     # raising progress in an edit moves the work forward
     a.client.post(f"/entries/{eid}/edit", data={"body": "typo", "progress": "130"}, content_type="multipart/form-data")
     assert a.one("SELECT progress_current FROM work WHERE id = ?", (wid,)) == 130
-    # removing the screenshot and adding another
+    # removing the image and adding another
     img = a.one("SELECT image_id FROM journal_entry_image WHERE entry_id = ?", (eid,))
     a.client.post(f"/entries/{eid}/edit", data={"body": "typo", "progress": "130", "remove_image": str(img),
                                                 "images": [(png((1, 2, 3)), "n.png")]}, content_type="multipart/form-data")

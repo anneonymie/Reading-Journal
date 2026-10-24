@@ -124,7 +124,7 @@
           <div class="shots {{ 'single' if images[e.id]|length == 1 else '' }}">
             {% for i in images[e.id] %}
               <a href="{{ url_for('journal.media', rel=i.file_path) }}" target="_blank">
-                <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="{{ i.alt_text or 'Screenshot' }}"
+                <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="{{ i.alt_text or 'Image' }}"
                      loading="lazy" width="{{ i.width }}" height="{{ i.height }}">
               </a>
             {% endfor %}
@@ -146,7 +146,7 @@
       <div class="composer-bar">
         <label class="attach">
           <input type="file" name="images" accept="image/*" multiple data-image-input>
-          <span>Add screenshots</span>
+          <span>Add images</span>
         </label>
         <label class="composer-progress">
           <span>{{ work.unit_abbrev }}</span>

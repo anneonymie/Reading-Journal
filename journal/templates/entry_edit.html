@@ -23,11 +23,11 @@
   {% if entry.kind == 'note' %}
     {% if images %}
     <fieldset>
-      <legend>Screenshots</legend>
+      <legend>Images</legend>
       <div class="edit-shots">
         {% for i in images %}
           <label class="edit-shot">
-            <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="Screenshot" loading="lazy">
+            <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="Image" loading="lazy">
             <span><input type="checkbox" name="remove_image" value="{{ i.id }}"> Remove</span>
           </label>
         {% endfor %}
@@ -37,7 +37,7 @@
     <div class="previews" data-previews hidden></div>
     <label class="attach">
       <input type="file" name="images" accept="image/*" multiple data-image-input>
-      <span>Add screenshots</span>
+      <span>Add images</span>
     </label>
 
     <label class="field short">

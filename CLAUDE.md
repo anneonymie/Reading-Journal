@@ -41,6 +41,7 @@ Flask app served by waitress. Server-rendered Jinja templates; plain SQL through
 - Every database connection must run `PRAGMA foreign_keys = ON`.
 - Every database connection must be closed, including in tests and scripts: use `try`/`finally` or the per-request `db()`. Windows won't delete or replace a file that's still open, so a leaked connection breaks cleanup, backups and moves. Close opened files and test responses too.
 - Timestamps are UTC text in exactly `2026-10-18T14:03:00Z` form.
+- Say "image", not "screenshot", in the app, docs, code and when talking to me. Images include covers, pictures in entries and custom emoji.
 - Prose fields end in `_md` and hold Markdown. Image paths are relative to the data folder, forward slashes only.
 - Data must stay platform agnostic: Markdown for prose, image files on disk, open formats for everything else.
 - Target environment: Windows, Python 3.13+. Avoid Unix-only commands in scripts the user runs.

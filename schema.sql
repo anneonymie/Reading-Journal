@@ -100,7 +100,7 @@ CREATE TABLE image (
                   CHECK (file_path <> '' AND substr(file_path, 1, 1) <> '/'
                          AND instr(file_path, '..') = 0 AND instr(file_path, '\') = 0
                          AND instr(file_path, ':') = 0),
-    sha256        TEXT NOT NULL UNIQUE,    -- the same screenshot uploaded twice is stored once
+    sha256        TEXT NOT NULL UNIQUE,    -- the same image uploaded twice is stored once
     mime_type     TEXT NOT NULL,
     width         INTEGER,
     height        INTEGER,
@@ -355,7 +355,7 @@ CREATE TABLE journal_entry_image (
     PRIMARY KEY (entry_id, image_id)
 ) STRICT;
 
--- Gallery: highlighted screenshots per work
+-- Gallery: highlighted images per work
 CREATE TABLE work_gallery (
     work_id    INTEGER NOT NULL REFERENCES work(id) ON DELETE CASCADE,
     image_id   INTEGER NOT NULL REFERENCES image(id) ON DELETE CASCADE,

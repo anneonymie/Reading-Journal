@@ -94,7 +94,8 @@ def test_foreign_keys_on_every_connection():
 
 def test_add_work_with_everything():
     a = App()
-    wid = a.add_work(title="Lantern", length_total="120", authors="Mori\nmori\nAki", artists="Ren",
+    wid = a.add_work(title="Lantern", length_total="120", creator_name=["Mori", "mori", "Aki", "Ren"],
+                     creator_author=["0", "1", "2"], creator_artist=["3"],
                      alt_titles="Ranta\nLantern", src_anilist="https://anilist.co/manga/12345/Lantern",
                      src_mangaupdates="https://www.mangaupdates.com/series/pm5ww2j/lantern",
                      src_ao3="", cover=(png(), "cover.png"))
@@ -110,7 +111,7 @@ def test_add_work_with_everything():
 
 def test_work_page_header_and_details():
     a = App()
-    wid = a.add_work(title="Lantern", format_code="manhwa", authors="Mori\nAki",
+    wid = a.add_work(title="Lantern", format_code="manhwa", creator_name=["Mori", "Aki"],
                      description_md="A *quiet* story.", alt_titles="Ranta")
     page = a.client.get(f"/works/{wid}").get_data(as_text=True)
     head = re.search(r'<header class="work-head">(.*?)</header>', page, re.S).group(1)
@@ -119,6 +120,61 @@ def test_work_page_header_and_details():
     assert head.index("Manhwa by") < head.index("A <em>quiet</em> story.")   # creators, then description
     assert "Ranta" not in head and "<dt>Alternate titles</dt><dd>Ranta</dd>" in details
     assert "quiet" not in details
+
+def creators_line(a, wid):
+    meta = re.search(r'<p class="work-meta">(.*?)</p>', a.client.get(f"/works/{wid}").get_data(as_text=True), re.S)
+    return " ".join(meta.group(1).split())
+
+def creator_roles(a, wid):
+    conn = a.db()
+    try:
+        return conn.execute("""SELECT c.name, wc.role FROM work_creator wc JOIN creator c ON c.id = wc.creator_id
+                               WHERE wc.work_id = ? ORDER BY c.name, wc.role""", (wid,)).fetchall()
+    finally:
+        conn.close()
+
+def test_creator_roles_shown_once_per_person():
+    a = App()
+    # Mori is typed twice (different capitals) with a different role each time
+    wid = a.add_work(format_code="manhwa", creator_name=["Mori", "Ren", "Asdf", "mori"],
+                     creator_author=["0"], creator_artist=["1", "3"])
+    assert creators_line(a, wid) == "Manhwa by Mori (Writer and Artist), Ren (Artist) and Asdf"
+    assert [tuple(r) for r in creator_roles(a, wid)] == [
+        ("Asdf", "unspecified"), ("Mori", "artist"), ("Mori", "author"), ("Ren", "artist")]
+
+def test_creator_without_role():
+    a = App()
+    wid = a.add_work(format_code="manhwa", creator_name=["Asdf"])
+    assert creators_line(a, wid) == "Manhwa by Asdf"
+
+def test_edit_form_keeps_creators_and_roles():
+    a = App()
+    wid = a.add_work(creator_name=["Mori", "Asdf"], creator_author=["0"], creator_artist=["0"])
+    rows = re.findall(r'<div class="creator-row".*?</div>', a.client.get(f"/works/{wid}/edit").get_data(as_text=True), re.S)
+    assert len(rows) == 4   # two people, then two blank rows
+    assert 'value="Mori"' in rows[0] and rows[0].count("checked") == 2
+    assert 'value="Asdf"' in rows[1] and "checked" not in rows[1]
+    assert 'value=""' in rows[2] and 'value="2"' in rows[2]   # tick boxes carry the row number
+    # a role the form doesn't manage, as an import might add
+    conn = a.db()
+    with conn:
+        conn.execute("INSERT INTO creator(name) VALUES ('Kei')")
+        conn.execute("INSERT INTO work_creator SELECT ?, id, 'translator' FROM creator WHERE name = 'Kei'", (wid,))
+    conn.close()
+    # untick Mori's artist role; a tick on a blank row is ignored
+    r = a.client.post(f"/works/{wid}/edit", data={"title": "Test Manga", "format_code": "manga",
+                      "length_unit": "chapter", "creator_name": ["Mori", "Asdf", ""],
+                      "creator_author": ["0"], "creator_artist": ["2"]}, content_type="multipart/form-data")
+    assert r.status_code == 302
+    assert [tuple(r) for r in creator_roles(a, wid)] == [
+        ("Asdf", "unspecified"), ("Kei", "translator"), ("Mori", "author")]
+
+def test_creators_kept_when_form_has_errors():
+    a = App()
+    r = a.client.post("/works/new", data={"title": "", "format_code": "manga", "status": "tbr",
+                                          "creator_name": ["Mori"], "creator_artist": ["0"]})
+    rows = re.findall(r'<div class="creator-row".*?</div>', r.get_data(as_text=True), re.S)
+    assert r.status_code == 400 and 'value="Mori"' in rows[0] and rows[0].count("checked") == 1
 
 def test_new_work_logs_initial_status():
     a = App()

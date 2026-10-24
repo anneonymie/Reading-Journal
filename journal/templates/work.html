@@ -9,7 +9,7 @@
       <h1>{{ work.title }}</h1>
       <p class="work-meta">
         {{ work.format_label }}
-        {%- for c in creators %}{% if loop.first %} by {% elif loop.last %} and {% else %}, {% endif %}{{ c.name }}{% if c.role == 'artist' %} (art){% endif %}{% endfor %}
+        {%- for c in creators %}{% if loop.first %} by {% elif loop.last %} and {% else %}, {% endif %}{{ c.name }}{% if c.roles %} ({{ c.roles }}){% endif %}{% endfor %}
       </p>
       {% if work.description_md %}<div class="prose work-description">{{ work.description_md|md }}</div>{% endif %}
       {% if completions > 1 %}<p class="work-meta">Completed {{ completions }} times</p>{% endif %}

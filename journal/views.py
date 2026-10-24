@@ -24,6 +24,10 @@ SOURCE_PATTERNS = {
 PUB_STATUSES = [("", "Unknown"), ("ongoing", "Ongoing"), ("completed", "Completed"),
                 ("hiatus", "On hiatus"), ("cancelled", "Cancelled")]
 MAX_TITLE = 300
+# Creator roles the work form manages: stored role -> label shown. A creator added
+# with neither role ticked gets the single role NO_ROLE and is shown with no label.
+CREATOR_ROLES = {"author": "Writer", "artist": "Artist"}
+NO_ROLE = "unspecified"
 
 
 def db():
@@ -120,6 +124,26 @@ def lines(raw):
     return out
 
 
+def merge_creators(rows):
+    """One entry per person (names match regardless of capitals), combining the roles of repeated rows."""
+    people = {}
+    for r in rows:
+        if r["name"]:
+            p = people.setdefault(r["name"].lower(), {"name": r["name"], **{k: False for k in CREATOR_ROLES}})
+            for k in CREATOR_ROLES:
+                p[k] = p[k] or r[k]
+    return list(people.values())
+
+
+def work_creators(work_id):
+    """The work's creators as the form shows them: writers first, then artists, then the rest."""
+    rows = [{"name": r["name"], **{k: r["role"] == k for k in CREATOR_ROLES}} for r in db().execute(
+        f"""SELECT c.name, wc.role FROM work_creator wc JOIN creator c ON c.id = wc.creator_id
+            WHERE wc.work_id = ? AND wc.role IN ({",".join("?" * (len(CREATOR_ROLES) + 1))})""",
+        (work_id, *CREATOR_ROLES, NO_ROLE))]
+    return sorted(merge_creators(rows), key=lambda p: ([not p[k] for k in CREATOR_ROLES], p["name"].lower()))
+
+
 # ------------------------------------------------------------------ library
 
 @bp.get("/")
@@ -157,7 +181,7 @@ def library():
 def empty_work_form():
     return {"title": "", "format_code": "", "length_unit": "", "length_total": "",
             "pub_status": "", "publisher": "", "pub_start": "", "pub_end": "",
-            "description_md": "", "alt_titles": "", "authors": "", "artists": "",
+            "description_md": "", "alt_titles": "", "creators": [],
             "status": "tbr", "src_anilist": "", "src_mangaupdates": "", "src_ao3": ""}
 
 
@@ -171,10 +195,7 @@ def work_form_from_db(work_id):
     form["length_total"] = "" if w["length_total"] is None else f"{w['length_total']:g}"
     form["alt_titles"] = "\n".join(r["title"] for r in c.execute(
         "SELECT title FROM work_alt_title WHERE work_id = ? ORDER BY id", (work_id,)))
-    for role, key in (("author", "authors"), ("artist", "artists")):
-        form[key] = "\n".join(r["name"] for r in c.execute(
-            """SELECT c.name FROM work_creator wc JOIN creator c ON c.id = wc.creator_id
-               WHERE wc.work_id = ? AND wc.role = ? ORDER BY c.name""", (work_id, role)))
+    form["creators"] = work_creators(work_id)
     for r in c.execute("SELECT source_code, external_id FROM work_source_id WHERE work_id = ?", (work_id,)):
         form[f"src_{r['source_code']}"] = r["external_id"]
     return form
@@ -185,6 +206,11 @@ def read_work_form(is_new):
     form = empty_work_form()
     for key in form:
         form[key] = (f.get(key) or "").strip()
+    # Each creator row is a name plus role tick boxes whose value is the row's number.
+    ticked = {k: set(f.getlist(f"creator_{k}")) for k in CREATOR_ROLES}
+    form["creators"] = [row for i, name in enumerate(f.getlist("creator_name"))
+                        if (row := {"name": name.strip()[:MAX_TITLE],
+                                    **{k: str(i) in ticked[k] for k in CREATOR_ROLES}})["name"]]
     errors = []
     lk = lookups()
     formats = {r["code"]: r for r in lk["formats"]}
@@ -212,7 +238,7 @@ def read_work_form(is_new):
             sources[s["code"]] = value
     parsed = {"length_total": total, "sources": sources,
               "alt_titles": [t for t in lines(form["alt_titles"]) if t.lower() != form["title"].lower()],
-              "authors": lines(form["authors"]), "artists": lines(form["artists"])}
+              "creators": merge_creators(form["creators"])}
     return form, parsed, errors
 
 
@@ -235,11 +261,13 @@ def save_related(c, work_id, parsed):
     c.execute("DELETE FROM work_alt_title WHERE work_id = ?", (work_id,))
     for t in parsed["alt_titles"]:
         c.execute("INSERT INTO work_alt_title(work_id, title) VALUES (?, ?)", (work_id, t))
-    c.execute("DELETE FROM work_creator WHERE work_id = ? AND role IN ('author', 'artist')", (work_id,))
-    for role, names in (("author", parsed["authors"]), ("artist", parsed["artists"])):
-        for name in names:
-            c.execute("INSERT OR IGNORE INTO creator(name) VALUES (?)", (name,))
-            cid = c.execute("SELECT id FROM creator WHERE name = ?", (name,)).fetchone()["id"]
+    # Roles the form doesn't manage (e.g. imported translators) are left alone.
+    c.execute(f"DELETE FROM work_creator WHERE work_id = ? AND role IN ({','.join('?' * (len(CREATOR_ROLES) + 1))})",
+              (work_id, *CREATOR_ROLES, NO_ROLE))
+    for p in parsed["creators"]:
+        c.execute("INSERT OR IGNORE INTO creator(name) VALUES (?)", (p["name"],))
+        cid = c.execute("SELECT id FROM creator WHERE name = ?", (p["name"],)).fetchone()["id"]
+        for role in [k for k in CREATOR_ROLES if p[k]] or [NO_ROLE]:
             c.execute("INSERT OR IGNORE INTO work_creator(work_id, creator_id, role) VALUES (?,?,?)",
                       (work_id, cid, role))
     c.execute("DELETE FROM work_source_id WHERE work_id = ?", (work_id,))
@@ -354,9 +382,8 @@ def render_work(work_id, composer=None, errors=None, status=200):
     c = db()
     work = get_work_or_404(work_id)
     alt_titles = c.execute("SELECT title FROM work_alt_title WHERE work_id = ? ORDER BY id", (work_id,)).fetchall()
-    creators = c.execute(
-        """SELECT c.name, wc.role FROM work_creator wc JOIN creator c ON c.id = wc.creator_id
-           WHERE wc.work_id = ? ORDER BY wc.role, c.name""", (work_id,)).fetchall()
+    creators = [{"name": p["name"], "roles": " and ".join(label for k, label in CREATOR_ROLES.items() if p[k])}
+                for p in work_creators(work_id)]
     sources = c.execute(
         """SELECT s.name, s.url_template, x.external_id FROM work_source_id x
            JOIN source s ON s.code = x.source_code WHERE x.work_id = ? ORDER BY s.rowid""",

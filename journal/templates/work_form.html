@@ -70,16 +70,20 @@
     <textarea name="description_md" rows="4">{{ form.description_md }}</textarea>
   </label>
 
-  <div class="row">
-    <label class="field">
-      <span>Authors <small>one per line</small></span>
-      <textarea name="authors" rows="2">{{ form.authors }}</textarea>
-    </label>
-    <label class="field">
-      <span>Artists <small>one per line</small></span>
-      <textarea name="artists" rows="2">{{ form.artists }}</textarea>
-    </label>
-  </div>
+  <fieldset data-creators>
+    <legend>Creators</legend>
+    <p class="hint">Type each person's name, then tick what they did. Leave both unticked to just show their name.</p>
+    {% set blank = {"name": "", "author": false, "artist": false} %}
+    {% set rows = form.creators + [blank] * ([2, 3 - form.creators|length]|max) %}
+    {% for c in rows %}
+    <div class="creator-row" data-creator-row>
+      <input name="creator_name" value="{{ c.name }}" maxlength="300" autocomplete="off"
+             placeholder="Name" aria-label="Creator {{ loop.index }} name">
+      <label class="check"><input type="checkbox" name="creator_author" value="{{ loop.index0 }}" {% if c.author %}checked{% endif %}> Writer</label>
+      <label class="check"><input type="checkbox" name="creator_artist" value="{{ loop.index0 }}" {% if c.artist %}checked{% endif %}> Artist</label>
+    </div>
+    {% endfor %}
+  </fieldset>
 
   <label class="field">
     <span>Alternate titles <small>one per line</small></span>

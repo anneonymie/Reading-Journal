@@ -112,6 +112,9 @@ legend { font-family: var(--display); font-weight: 700; padding: 0 .4rem; }
 .stack { display: flex; flex-direction: column; gap: 1rem; }
 .row { display: flex; gap: 1rem; flex-wrap: wrap; }
 .row > .field { min-width: 10rem; }
+.creator-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; }
+.creator-row > input { flex: 1 1 14rem; width: auto; min-width: 0; }
+[data-creators] > button { align-self: flex-start; }
 .actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 .errors { background: var(--accent-soft); border-left: 4px solid var(--danger); border-radius: 6px; padding: .5rem .9rem; margin: 1rem 0; }
 .errors p { margin: .25rem 0; }

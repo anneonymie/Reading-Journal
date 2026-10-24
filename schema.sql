@@ -165,7 +165,7 @@ CREATE TABLE creator (
 CREATE TABLE work_creator (
     work_id    INTEGER NOT NULL REFERENCES work(id) ON DELETE CASCADE,
     creator_id INTEGER NOT NULL REFERENCES creator(id) ON DELETE CASCADE,
-    role       TEXT NOT NULL DEFAULT 'author',   -- author, artist, translator, original creator
+    role       TEXT NOT NULL DEFAULT 'author',   -- author (shown as Writer), artist, unspecified, translator, original creator
     PRIMARY KEY (work_id, creator_id, role)
 ) STRICT;
 

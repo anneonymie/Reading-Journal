@@ -62,6 +62,30 @@
     apply();
   }
 
+  // Creators: a button that adds a blank row. Each row's tick boxes carry its row number.
+  document.querySelectorAll("[data-creators]").forEach((set) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.textContent = "Add another creator";
+    button.addEventListener("click", () => {
+      const rows = set.querySelectorAll("[data-creator-row]");
+      const row = rows[rows.length - 1].cloneNode(true);
+      row.querySelectorAll("input").forEach((input) => {
+        if (input.type === "checkbox") {
+          input.checked = false;
+          input.value = String(rows.length);
+        } else {
+          input.value = "";
+          input.setAttribute("aria-label", `Creator ${rows.length + 1} name`);
+        }
+      });
+      button.before(row);
+      row.querySelector("input").focus();
+    });
+    set.appendChild(button);
+  });
+
   // Images: paste, drop or pick; preview them and allow removal before posting.
   document.querySelectorAll("input[data-image-input]").forEach((input) => {
     const form = input.form;

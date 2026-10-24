@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% from "_macros.html" import errors_box, cover %}
-{% block title %}{{ "Edit " ~ work.title if work else "Add work" }} | Reading Journal{% endblock %}
+{% block title %}{{ "Edit " ~ work.title if work else "Add Work" }} | Reading Journal{% endblock %}
 {% block main_class %}narrow{% endblock %}
 {% block content %}
-<h1>{{ "Edit " ~ work.title if work else "Add work" }}</h1>
+<h1>{{ "Edit " ~ work.title if work else "Add Work" }}</h1>
 {{ errors_box(errors, conflicts) }}
 
 <form method="post" enctype="multipart/form-data" class="stack work-form">

@@ -21,10 +21,39 @@ There is no password, so anyone on your home Wi-Fi who knows the address can ope
 
 - Back up the `journal-data` folder regularly. It is your whole journal.
 - Copy it only while the journal is stopped.
-- To move the journal to another computer or the home server, stop it and copy the folder.
+- To move the journal to another computer or restore a backup, see "Restoring or moving your journal" below.
 - When an update changes how the journal stores your data, it first saves a copy in `journal-data/backups`. Once you're happy the update worked, you can delete old copies to save space.
 - If the journal says your data was last used by a newer version, install that newer version. An older one won't open it, to keep it safe.
 - The version you're running is shown at the bottom of every page. `CHANGELOG.md` lists what changed in each version.
+
+## Restoring or moving your journal
+
+Always stop the journal first (close its window). Copying or replacing files while it's running can damage your journal.
+
+**Moving to a new computer**
+
+1. On the new computer, install Python as in "Running it on Windows" above.
+2. Copy the journal's folder (the one with `start.bat` in it) to the new computer. Leave out the `.venv` folder: it only works on the computer that made it, and `start.bat` makes a fresh one.
+3. Copy your `journal-data` folder into that folder, next to `start.bat`. If there's already a `journal-data` folder there, from trying the journal out on the new computer, rename it to `journal-data-old` first.
+4. Double-click `start.bat` and check your works are there.
+
+To move to the home server instead, see "Moving to a home server" below.
+
+**Restoring a backup of your `journal-data` folder**
+
+1. Rename the current `journal-data` folder to `journal-data-old`, so nothing is lost if the backup turns out to be the wrong one.
+2. Copy your backup folder in next to `start.bat` and make sure it's named `journal-data`.
+3. Double-click `start.bat` and check your works are there. Once you're happy, you can delete `journal-data-old`.
+
+**Restoring a copy from `journal-data/backups`**
+
+The journal saves these automatically before an update changes how your data is stored. They hold your works and journal entries; your images stay in the `images` folder and don't need restoring. Each name says which data version it is and when it was saved (in UTC, the time in London without summer time), like `journal-v2-20261023T144000Z.db`.
+
+1. In `journal-data`, rename `journal.db` to `journal-old.db`. If there are files called `journal.db-wal` or `journal.db-shm`, rename those to `journal-old.db-wal` and `journal-old.db-shm`. They belong to the old database and would damage the restored one.
+2. Copy the backup file from `backups` into `journal-data` and rename it to `journal.db`. If Windows hides file extensions, the names show without `.db`.
+3. These copies are from before an update, so starting the journal will run that update again. If the update itself caused the problem, you'll need the previous version of the journal too: ask for help before restoring.
+
+When the journal starts on a restored or moved journal, it checks the data first. Data from an older version is backed up and updated automatically. Data from a newer version isn't opened, so an older copy of the journal can't damage it.
 
 ## Trying it with sample data
 

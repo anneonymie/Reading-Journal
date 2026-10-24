@@ -376,6 +376,7 @@ def test_empty_library_message():
     page = a.client.get("/").get_data(as_text=True)
     assert "You don't have any works in your journal. Use the Add Work button to add one." in page
     assert ">Add Work</a>" in page
+    assert "Restoring or moving your journal" in page
 
 def test_media_cannot_escape_data_folder():
     a = App()

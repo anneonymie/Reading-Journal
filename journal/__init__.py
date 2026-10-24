@@ -8,7 +8,7 @@ from . import db as dbmod
 from .text import fmt_num, render_markdown
 
 # The app's release version. Change it only as part of a release (see CLAUDE.md).
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 def create_app(data_dir, testing=False):

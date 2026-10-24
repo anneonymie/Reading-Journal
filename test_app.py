@@ -242,6 +242,22 @@ def test_edit_work_and_unit_change_clears_progress():
     assert a.one("SELECT progress_valid FROM journal_entry_progress WHERE work_id = ? AND progress_value IS NOT NULL", (wid,)) == 0
     assert a.one("SELECT external_id FROM work_source_id WHERE work_id = ?", (wid,)) == "1"   # own ID isn't a conflict
 
+def test_remove_cover_button():
+    a = App()
+    wid = a.add_work(cover=(png(), "cover.png"))
+    form = a.client.get(f"/works/{wid}/edit").get_data(as_text=True)
+    assert 'id="remove-cover" name="remove_cover"' in form and 'for="remove-cover" class="remove-cover"' in form
+    edit = {"title": "Test Manga", "format_code": "manga", "length_unit": "chapter"}
+    # a new upload replaces the cover without ticking remove
+    a.client.post(f"/works/{wid}/edit", data={**edit, "cover": (png((0, 0, 255)), "new.png")},
+                  content_type="multipart/form-data")
+    assert a.one("SELECT COUNT(*) FROM image") == 2
+    new = a.one("SELECT cover_image_id FROM work WHERE id = ?", (wid,))
+    assert new == a.one("SELECT max(id) FROM image")
+    a.client.post(f"/works/{wid}/edit", data={**edit, "remove_cover": "1"}, content_type="multipart/form-data")
+    assert a.one("SELECT cover_image_id FROM work WHERE id = ?", (wid,)) is None
+    assert 'id="remove-cover"' not in a.client.get(f"/works/{wid}/edit").get_data(as_text=True)
+
 def test_delete_work():
     a = App()
     wid = a.add_work()

@@ -57,9 +57,14 @@
   <fieldset>
     <legend>Cover</legend>
     {% if work and work.cover_path %}
+      {# The red x is a label for a hidden tick box, so removing works without JavaScript. #}
       <div class="cover-current">
-        {{ cover(work.cover_path, work.title, "cover small") }}
-        <label class="check"><input type="checkbox" name="remove_cover" value="1"> Remove this cover</label>
+        <input type="checkbox" id="remove-cover" name="remove_cover" value="1" class="visually-hidden">
+        <div class="cover-thumb">
+          {{ cover(work.cover_path, work.title, "cover small") }}
+          <label for="remove-cover" class="remove-cover" title="Remove this cover"><span aria-hidden="true">×</span><span class="visually-hidden">Remove this cover</span></label>
+        </div>
+        <p class="cover-removed hint">The cover will be removed when you save. <label for="remove-cover">Undo</label></p>
       </div>
     {% endif %}
     <input type="file" name="cover" accept="image/png,image/jpeg,image/gif,image/webp">

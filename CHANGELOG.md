@@ -6,6 +6,7 @@ Updates to the Reading Journal app. The current app version appears at the botto
 - The changelog page no longer shows an empty "Unreleased" section when there's nothing new yet.
 - On a work's page, the description now sits at the top under the creators, and alternate titles have moved into Details. The creators line reads "Manhwa by …" without a comma.
 - Creators are added one person at a time: type their name, then tick Writer, Artist, both, or neither. Someone who did both is listed once as "(Writer and Artist)", and someone with neither ticked is listed by name alone. Writers are now labelled "(Writer)" on the work page.
+- On the edit page, a red × on the cover removes it, with an Undo link until you save. Uploading a new cover still replaces the old one without needing the ×.
 
 ## 0.1.0 (2026-10-23)
 

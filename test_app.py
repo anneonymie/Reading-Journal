@@ -399,7 +399,7 @@ def test_footer_version_links_and_credit():
     for href in ('href="/"', 'href="/works/new"',
                  'href="https://creativecommons.org/licenses/by/4.0/"'):
         assert href in footer, href
-    assert "EmojiOne" in footer
+    assert "Notebook logo by EmojiOne, recolored, licensed under" in footer   # CC BY: credit, changes, licence link
 
 def test_changelog_page():
     a = App()

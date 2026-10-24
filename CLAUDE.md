@@ -23,7 +23,7 @@ Flask app served by waitress. Server-rendered Jinja templates; plain SQL through
 - `journal/images.py`: `store_image()`. Validates uploads with Pillow and stores them as `images/<sha[:2]>/<sha>.<ext>`, deduped by hash.
 - `journal/text.py`: Markdown rendering (raw HTML disabled), UTC timestamp helpers, number formatting.
 - `journal/templates/`: Jinja templates. `base.html` is the layout (header, footer with links, version and logo credit); `_macros.html` holds shared bits.
-- `journal/static/`: `style.css`, `app.js` (optional enhancements; every page works without JS), bundled fonts, `emojione-notebook.svg` (logo and tab icon; CC BY 4.0, so the footer credit must stay).
+- `journal/static/`: `style.css`, `app.js` (optional enhancements; every page works without JS), bundled fonts, `emojione-notebook.svg` (logo and tab icon; EmojiOne's icon, recolored by me). CC BY 4.0 requires the footer credit: creator, that it was changed, and a link to the licence. Keep all three.
 - `Dockerfile`, `docker-compose.yml`: home server deployment. The data folder is mounted at `/data`.
 
 ## Commands

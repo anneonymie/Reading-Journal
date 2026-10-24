@@ -7,11 +7,11 @@
     {{ cover(work.cover_path, work.title, "cover large") }}
     <div class="work-info">
       <h1>{{ work.title }}</h1>
-      {% if alt_titles %}<p class="alt-titles">{% for t in alt_titles %}<span>{{ t.title }}</span>{% endfor %}</p>{% endif %}
       <p class="work-meta">
         {{ work.format_label }}
-        {%- for c in creators %}{% if loop.first %}, by {% elif loop.last %} and {% else %}, {% endif %}{{ c.name }}{% if c.role == 'artist' %} (art){% endif %}{% endfor %}
+        {%- for c in creators %}{% if loop.first %} by {% elif loop.last %} and {% else %}, {% endif %}{{ c.name }}{% if c.role == 'artist' %} (art){% endif %}{% endfor %}
       </p>
+      {% if work.description_md %}<div class="prose work-description">{{ work.description_md|md }}</div>{% endif %}
       {% if completions > 1 %}<p class="work-meta">Completed {{ completions }} times</p>{% endif %}
       <a class="edit-link" href="{{ url_for('journal.work_edit', work_id=work.id) }}">Edit details</a>
     </div>
@@ -76,6 +76,7 @@
   <details class="panel">
     <summary>Details</summary>
     <dl class="facts">
+      {% if alt_titles %}<dt>Alternate titles</dt><dd>{% for t in alt_titles %}{{ t.title }}{% if not loop.last %}<br>{% endif %}{% endfor %}</dd>{% endif %}
       {% if work.publisher %}<dt>Publisher</dt><dd>{{ work.publisher }}</dd>{% endif %}
       {% if work.pub_start or work.pub_end %}<dt>Published</dt><dd>{{ work.pub_start or "?" }}{% if work.pub_end %} to {{ work.pub_end }}{% endif %}</dd>{% endif %}
       {% if work.pub_status %}<dt>Publishing</dt><dd>{{ work.pub_status|capitalize }}</dd>{% endif %}
@@ -84,7 +85,6 @@
         <dt>{{ s.name }}</dt><dd><a href="{{ s.url_template.replace('{id}', s.external_id) }}" rel="noreferrer" target="_blank">{{ s.external_id }}</a></dd>
       {% endfor %}
     </dl>
-    {% if work.description_md %}<div class="prose">{{ work.description_md|md }}</div>{% endif %}
   </details>
 
   <section class="journal" aria-labelledby="journal-heading">

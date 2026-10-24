@@ -108,6 +108,18 @@ def test_add_work_with_everything():
     with a.client.get(f"/media/{path}") as r:   # closing releases the image file
         assert r.status_code == 200
 
+def test_work_page_header_and_details():
+    a = App()
+    wid = a.add_work(title="Lantern", format_code="manhwa", authors="Mori\nAki",
+                     description_md="A *quiet* story.", alt_titles="Ranta")
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    head = re.search(r'<header class="work-head">(.*?)</header>', page, re.S).group(1)
+    details = re.search(r"<summary>Details</summary>(.*?)</details>", page, re.S).group(1)
+    assert "Manhwa by Aki and Mori" in head
+    assert head.index("Manhwa by") < head.index("A <em>quiet</em> story.")   # creators, then description
+    assert "Ranta" not in head and "<dt>Alternate titles</dt><dd>Ranta</dd>" in details
+    assert "quiet" not in details
+
 def test_new_work_logs_initial_status():
     a = App()
     wid = a.add_work(status="tbr")

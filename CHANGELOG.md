@@ -4,6 +4,7 @@ Updates to the Reading Journal app. The current app version appears at the botto
 ## Unreleased
 
 - The changelog page no longer shows an empty "Unreleased" section when there's nothing new yet.
+- On a work's page, the description now sits at the top under the creators, and alternate titles have moved into Details. The creators line reads "Manhwa by …" without a comma.
 
 ## 0.1.0 (2026-10-23)
 

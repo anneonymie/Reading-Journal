@@ -395,8 +395,8 @@ def test_footer_version_links_and_credit():
     a = App()
     assert re.fullmatch(r"\d+\.\d+\.\d+", VERSION)
     footer = re.search(r'<footer class="site">(.*?)</footer>', a.client.get("/").get_data(as_text=True), re.S).group(1)
-    assert f"Reading Journal {VERSION}" in footer
-    for href in ('href="/"', 'href="/works/new"', 'href="/changelog"',
+    assert f'Reading Journal {VERSION} • <a href="/changelog">Changelog</a>' in footer
+    for href in ('href="/"', 'href="/works/new"',
                  'href="https://creativecommons.org/licenses/by/4.0/"'):
         assert href in footer, href
     assert "EmojiOne" in footer

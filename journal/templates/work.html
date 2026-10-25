@@ -1,12 +1,13 @@
 {% extends "base.html" %}
-{% from "_macros.html" import cover, local_time, progress_text, errors_box %}
+{% from "_macros.html" import cover, local_time, progress_text, errors_box, format_help %}
 {% block title %}{{ work.title }} | Reading Journal{% endblock %}
 {% block content %}
 <article class="work">
   <header class="work-head">
     {{ cover(work.cover_path, work.title, "cover large") }}
     <div class="work-info">
-      <h1>{{ work.title }}</h1>
+      {% set year = work.pub_start[:4] if work.pub_start and work.pub_start[:4].isdigit() else none %}
+      <h1>{{ work.title }}{% if year %} <span class="work-year">({{ year }})</span>{% endif %}</h1>
       <p class="work-meta">
         {{ work.format_label }}
         {%- for c in creators %}{% if loop.first %} by {% elif loop.last %} and {% else %}, {% endif %}{{ c.name }}{% if c.roles %} ({{ c.roles }}){% endif %}{% endfor %}
@@ -21,7 +22,7 @@
 
   <section class="controls" aria-label="Status and progress">
     <form method="post" action="{{ url_for('journal.work_status', work_id=work.id) }}" class="control">
-      <label for="status">Status</label>
+      <label for="status">Reading status</label>
       <div class="inline">
         <select id="status" name="status">
           {% if not work.status_code %}<option value="" selected disabled>None</option>{% endif %}
@@ -48,7 +49,7 @@
     </form>
   </section>
 
-  <details class="panel" {% if work.notes_md %}open{% endif %}>
+  <details class="panel" open>
     <summary>Notes</summary>
     <form method="post" action="{{ url_for('journal.work_notes', work_id=work.id) }}" class="stack">
       <textarea name="notes_md" rows="3" aria-label="Notes" placeholder="Where you're at, what you're feeling about it">{{ work.notes_md or "" }}</textarea>
@@ -56,7 +57,7 @@
     </form>
   </details>
 
-  <details class="panel">
+  <details class="panel" open>
     <summary>Review{% if work.rating is not none %} <span class="rating">{{ "%.1f"|format(work.rating) }}</span>{% endif %}</summary>
     {% if work.review_md %}<div class="prose">{{ work.review_md|md }}</div>{% endif %}
     <form method="post" action="{{ url_for('journal.work_review', work_id=work.id) }}" class="stack">
@@ -73,11 +74,11 @@
     </form>
   </details>
 
-  <details class="panel">
+  <details class="panel" open>
     <summary>Details</summary>
     <dl class="facts">
       {% if alt_titles %}<dt>Alternate titles</dt><dd>{% for t in alt_titles %}{{ t.title }}{% if not loop.last %}<br>{% endif %}{% endfor %}</dd>{% endif %}
-      {% if work.publisher %}<dt>Publisher</dt><dd>{{ work.publisher }}</dd>{% endif %}
+      {% if publishers %}<dt>{{ "Publishers" if publishers|length > 1 else "Publisher" }}</dt><dd>{% for p in publishers %}{{ p.name }}{% if not loop.last %}<br>{% endif %}{% endfor %}</dd>{% endif %}
       {% if work.pub_start or work.pub_end %}<dt>Published</dt><dd>{{ work.pub_start or "?" }}{% if work.pub_end %} to {{ work.pub_end }}{% endif %}</dd>{% endif %}
       {% if work.pub_status %}<dt>Publishing</dt><dd>{{ work.pub_status|capitalize }}</dd>{% endif %}
       <dt>Length</dt><dd>{% if work.length_total %}{{ work.length_total|num }} {{ work.unit_plural }}{% else %}Counted in {{ work.unit_plural }}, total unknown{% endif %}</dd>
@@ -146,7 +147,7 @@
       <div class="composer-bar">
         <label class="attach">
           <input type="file" name="images" accept="image/*" multiple data-image-input>
-          <span>Add images</span>
+          <span>+ Add images</span>
         </label>
         <label class="composer-progress">
           <span>{{ work.unit_abbrev }}</span>
@@ -161,6 +162,7 @@
           <input name="posted_at" class="js-utc" value="{{ composer.posted_at }}" placeholder="2026-10-17T14:03:00Z" autocomplete="off">
         </label>
       </details>
+      {{ format_help() }}
     </form>
   </section>
 </article>

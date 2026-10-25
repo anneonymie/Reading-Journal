@@ -57,7 +57,11 @@ When the journal starts on a restored or moved journal, it checks the data first
 
 ## Trying it with sample data
 
-`python seed.py` creates a separate `journal-demo` folder with invented works. To view it, run the app with the `JOURNAL_DATA` environment variable set to `journal-demo`. Your real `journal-data` is never touched.
+Double-click `dev.bat`. The first time, it creates a separate `journal-demo` folder with invented works, then opens it at `http://localhost:8420`. Your real `journal-data` is never touched.
+
+`dev.bat` is for working on the app: it restarts by itself whenever the code changes, so you only need to refresh the page. Only this computer can open it, not your phone. Close `start.bat` first, since both use the same address. To use your real journal, close `dev.bat` and double-click `start.bat`.
+
+To start the sample journal over, delete the `journal-demo` folder and run `dev.bat` again.
 
 ## Moving to a home server (Docker)
 

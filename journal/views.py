@@ -14,12 +14,11 @@ from .text import now_utc, parse_utc
 
 bp = Blueprint("journal", __name__)
 
-# How a pasted URL is turned into a source ID. The first pattern accepts a bare ID.
+# How a pasted link is recognised as a source and turned into its ID.
 SOURCE_PATTERNS = {
-    "anilist": (r"\d+", [r"anilist\.co/(?:manga|anime)/(\d+)"]),
-    "mangaupdates": (r"[0-9a-z]+", [r"mangaupdates\.com/series/([0-9a-z]+)",
-                                    r"mangaupdates\.com/series\.html\?id=(\d+)"]),
-    "ao3": (r"\d+", [r"archiveofourown\.org/works/(\d+)"]),
+    "anilist": [r"anilist\.co/(?:manga|anime)/(\d+)"],
+    "mangaupdates": [r"mangaupdates\.com/series/([0-9a-z]+)", r"mangaupdates\.com/series\.html\?id=(\d+)"],
+    "ao3": [r"archiveofourown\.org/works/(\d+)"],
 }
 PUB_STATUSES = [("", "Unknown"), ("ongoing", "Ongoing"), ("completed", "Completed"),
                 ("hiatus", "On hiatus"), ("cancelled", "Cancelled")]
@@ -98,30 +97,66 @@ def parse_rating(raw, errors):
     return float(value)
 
 
-def parse_source_id(code, raw, errors, name):
-    raw = (raw or "").strip()
-    if not raw:
-        return None
-    bare, url_patterns = SOURCE_PATTERNS[code]
-    lowered = raw.lower()
-    if re.fullmatch(bare, lowered):
-        return lowered
-    for pattern in url_patterns:
-        m = re.search(pattern, lowered)
-        if m:
-            return m.group(1)
-    errors.append(f"{name}: paste the work's {name} link or its ID.")
-    return None
+def parse_source_links(links, sources, errors):
+    """Work out which site each pasted link is from: {source code: ID}."""
+    names = {s["code"]: s["name"] for s in sources}
+    *others, last = names.values()
+    found = {}
+    for raw in links:
+        match = next(((code, m.group(1)) for code, patterns in SOURCE_PATTERNS.items()
+                      for p in patterns if (m := re.search(p, raw.lower()))), None)
+        if match is None:
+            errors.append(f"“{raw}” isn't a link to a work on {', '.join(others)} or {last}. "
+                          "Paste the whole link from the work's page.")
+        elif found.get(match[0], match[1]) != match[1]:
+            errors.append(f"A work can only have one {names[match[0]]} link.")
+        else:
+            found[match[0]] = match[1]
+    return found
 
 
-def lines(raw):
+def source_url(source, external_id):
+    return source["url_template"].replace("{id}", external_id)
+
+
+def distinct(values):
+    """Non-blank values with repeats dropped (regardless of capitals), in order."""
     seen, out = set(), []
-    for line in (raw or "").splitlines():
-        line = line.strip()
-        if line and line.lower() not in seen:
-            seen.add(line.lower())
-            out.append(line[:MAX_TITLE])
+    for value in values:
+        value = value.strip()[:MAX_TITLE]
+        if value and value.lower() not in seen:
+            seen.add(value.lower())
+            out.append(value)
     return out
+
+
+PARTIAL_DATE = re.compile(r"(\d{4})(?:-(0[1-9]|1[0-2]))?")
+
+
+def split_partial_date(value):
+    """'2019-04' -> year, month and no leftover. Anything else is kept whole as a leftover."""
+    m = PARTIAL_DATE.fullmatch(value or "")
+    if m:
+        return {"year": m.group(1), "month": m.group(2) or "", "legacy": ""}
+    return {"year": "", "month": "", "legacy": value or ""}
+
+
+def read_partial_date(form, prefix, label, errors):
+    """Combine the year box and month list into '2019' or '2019-04'.
+
+    With no year, a leftover value saved before the pickers existed is kept as it was.
+    """
+    year, month = form[f"{prefix}_year"], form[f"{prefix}_month"]
+    if not year:
+        if month:
+            errors.append(f"{label}: add a year to go with the month.")
+        return form[f"{prefix}_legacy"] or None
+    if not re.fullmatch(r"[12]\d{3}", year):
+        errors.append(f"{label}: the year must be four digits, like 2019.")
+        return None
+    if month and not re.fullmatch(r"0[1-9]|1[0-2]", month):
+        month = ""
+    return f"{year}-{month}" if month else year
 
 
 def merge_creators(rows):
@@ -178,27 +213,47 @@ def library():
 
 # ------------------------------------------------------------------ add / edit works
 
+PUB_DATES = {"pub_start": "Started", "pub_end": "Ended"}
+
+
 def empty_work_form():
-    return {"title": "", "format_code": "", "length_unit": "", "length_total": "",
-            "pub_status": "", "publisher": "", "pub_start": "", "pub_end": "",
-            "description_md": "", "alt_titles": "", "creators": [],
-            "status": "tbr", "src_anilist": "", "src_mangaupdates": "", "src_ao3": ""}
+    form = {"title": "", "format_code": "", "length_unit": "", "length_total": "", "pub_status": "",
+            "description_md": "", "alt_titles": [], "publishers": [], "source_links": [], "creators": [],
+            "status": "tbr"}
+    for prefix in PUB_DATES:
+        form.update({f"{prefix}_year": "", f"{prefix}_month": "", f"{prefix}_legacy": ""})
+    return form
 
 
 def work_form_from_db(work_id):
     c = db()
     w = c.execute("SELECT * FROM work WHERE id = ?", (work_id,)).fetchone()
     form = empty_work_form()
-    for key in ("title", "format_code", "length_unit", "pub_status", "publisher",
-                "pub_start", "pub_end", "description_md"):
+    for key in ("title", "format_code", "length_unit", "pub_status", "description_md"):
         form[key] = w[key] or ""
+    for prefix in PUB_DATES:
+        for part, value in split_partial_date(w[prefix]).items():
+            form[f"{prefix}_{part}"] = value
     form["length_total"] = "" if w["length_total"] is None else f"{w['length_total']:g}"
-    form["alt_titles"] = "\n".join(r["title"] for r in c.execute(
-        "SELECT title FROM work_alt_title WHERE work_id = ? ORDER BY id", (work_id,)))
+    form["alt_titles"] = [r["title"] for r in c.execute(
+        "SELECT title FROM work_alt_title WHERE work_id = ? ORDER BY id", (work_id,))]
+    form["publishers"] = [r["name"] for r in work_publishers(work_id)]
     form["creators"] = work_creators(work_id)
-    for r in c.execute("SELECT source_code, external_id FROM work_source_id WHERE work_id = ?", (work_id,)):
-        form[f"src_{r['source_code']}"] = r["external_id"]
+    form["source_links"] = [source_url(r, r["external_id"]) for r in work_sources(work_id)]
     return form
+
+
+def work_publishers(work_id):
+    return db().execute(
+        """SELECT p.name FROM work_publisher wp JOIN publisher p ON p.id = wp.publisher_id
+           WHERE wp.work_id = ? ORDER BY wp.position, p.name""", (work_id,)).fetchall()
+
+
+def work_sources(work_id):
+    return db().execute(
+        """SELECT s.name, s.url_template, x.external_id FROM work_source_id x
+           JOIN source s ON s.code = x.source_code WHERE x.work_id = ? ORDER BY s.rowid""",
+        (work_id,)).fetchall()
 
 
 def read_work_form(is_new):
@@ -206,6 +261,8 @@ def read_work_form(is_new):
     form = empty_work_form()
     for key in form:
         form[key] = (f.get(key) or "").strip()
+    for key, field in (("alt_titles", "alt_title"), ("publishers", "publisher"), ("source_links", "source_link")):
+        form[key] = [v.strip()[:MAX_TITLE] for v in f.getlist(field) if v.strip()]
     # Each creator row is a name plus role tick boxes whose value is the row's number.
     ticked = {k: set(f.getlist(f"creator_{k}")) for k in CREATOR_ROLES}
     form["creators"] = [row for i, name in enumerate(f.getlist("creator_name"))
@@ -229,15 +286,18 @@ def read_work_form(is_new):
     total = parse_number(form["length_total"], "Total length", errors, allow_zero=False)
     if form["pub_status"] not in {code for code, _ in PUB_STATUSES}:
         form["pub_status"] = ""
+    dates = {prefix: read_partial_date(form, prefix, label, errors) for prefix, label in PUB_DATES.items()}
+    start, end = (split_partial_date(dates[p]) for p in PUB_DATES)
+    if start["year"] and end["year"]:
+        # Compare only as precisely as both are known: Started 2019-04, Ended 2019 is fine.
+        n = min(len(dates["pub_start"]), len(dates["pub_end"]))
+        if dates["pub_end"][:n] < dates["pub_start"][:n]:
+            errors.append("Ended can't be before Started.")
     if is_new and form["status"] not in {r["code"] for r in lk["statuses"]}:
         errors.append("Choose a status.")
-    sources = {}
-    for s in lk["sources"]:
-        value = parse_source_id(s["code"], form[f"src_{s['code']}"], errors, s["name"])
-        if value:
-            sources[s["code"]] = value
-    parsed = {"length_total": total, "sources": sources,
-              "alt_titles": [t for t in lines(form["alt_titles"]) if t.lower() != form["title"].lower()],
+    sources = parse_source_links(form["source_links"], lk["sources"], errors)
+    parsed = {"length_total": total, "sources": sources, **dates, "publishers": distinct(form["publishers"]),
+              "alt_titles": [t for t in distinct(form["alt_titles"]) if t.lower() != form["title"].lower()],
               "creators": merge_creators(form["creators"])}
     return form, parsed, errors
 
@@ -261,6 +321,11 @@ def save_related(c, work_id, parsed):
     c.execute("DELETE FROM work_alt_title WHERE work_id = ?", (work_id,))
     for t in parsed["alt_titles"]:
         c.execute("INSERT INTO work_alt_title(work_id, title) VALUES (?, ?)", (work_id, t))
+    c.execute("DELETE FROM work_publisher WHERE work_id = ?", (work_id,))
+    for pos, name in enumerate(parsed["publishers"]):
+        c.execute("INSERT OR IGNORE INTO publisher(name) VALUES (?)", (name,))
+        c.execute("""INSERT INTO work_publisher(work_id, publisher_id, position)
+                     SELECT ?, id, ? FROM publisher WHERE name = ?""", (work_id, pos, name))
     # Roles the form doesn't manage (e.g. imported translators) are left alone.
     c.execute(f"DELETE FROM work_creator WHERE work_id = ? AND role IN ({','.join('?' * (len(CREATOR_ROLES) + 1))})",
               (work_id, *CREATOR_ROLES, NO_ROLE))
@@ -303,11 +368,11 @@ def work_new():
         with c:
             cover_id = store_image(c, current_app.config["DATA_DIR"], request.files.get("cover"))
             work_id = c.execute(
-                """INSERT INTO work(title, format_code, description_md, cover_image_id, publisher,
+                """INSERT INTO work(title, format_code, description_md, cover_image_id,
                                     pub_start, pub_end, pub_status, length_unit, length_total)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
                 (form["title"], form["format_code"], form["description_md"] or None, cover_id,
-                 form["publisher"] or None, form["pub_start"] or None, form["pub_end"] or None,
+                 parsed["pub_start"], parsed["pub_end"],
                  form["pub_status"] or None, form["length_unit"], parsed["length_total"]),
             ).lastrowid
             save_related(c, work_id, parsed)
@@ -342,10 +407,10 @@ def work_edit(work_id):
                 cover_id = new_cover
             c.execute(
                 """UPDATE work SET title=?, format_code=?, description_md=?, cover_image_id=?,
-                       publisher=?, pub_start=?, pub_end=?, pub_status=?, length_unit=?, length_total=?
+                       pub_start=?, pub_end=?, pub_status=?, length_unit=?, length_total=?
                    WHERE id=?""",
                 (form["title"], form["format_code"], form["description_md"] or None, cover_id,
-                 form["publisher"] or None, form["pub_start"] or None, form["pub_end"] or None,
+                 parsed["pub_start"], parsed["pub_end"],
                  form["pub_status"] or None, form["length_unit"], parsed["length_total"], work_id),
             )
             if unit_changed:
@@ -388,10 +453,6 @@ def render_work(work_id, composer=None, errors=None, status=200):
     alt_titles = c.execute("SELECT title FROM work_alt_title WHERE work_id = ? ORDER BY id", (work_id,)).fetchall()
     creators = [{"name": p["name"], "roles": " and ".join(label for k, label in CREATOR_ROLES.items() if p[k])}
                 for p in work_creators(work_id)]
-    sources = c.execute(
-        """SELECT s.name, s.url_template, x.external_id FROM work_source_id x
-           JOIN source s ON s.code = x.source_code WHERE x.work_id = ? ORDER BY s.rowid""",
-        (work_id,)).fetchall()
     entries = c.execute(
         """SELECT je.*, p.progress_valid, u.abbrev AS entry_unit_abbrev, u.plural AS entry_unit_plural,
                   sf.label AS from_label, st.label AS to_label
@@ -415,7 +476,8 @@ def render_work(work_id, composer=None, errors=None, status=200):
         composer = {"body": "", "progress": "" if work["progress_current"] is None
                     else f"{work['progress_current']:g}", "posted_at": ""}
     return render_template("work.html", work=work, alt_titles=alt_titles, creators=creators,
-                           work_sources=sources, entries=entries, images=images,
+                           publishers=work_publishers(work_id), work_sources=work_sources(work_id),
+                           entries=entries, images=images,
                            completions=completions["completions"] if completions else 0,
                            composer=composer, errors=errors or [], **lookups()), status
 
@@ -435,12 +497,15 @@ def work_status(work_id):
     if new == old:
         flash(f"Status is already {work['status_label']}.")
         return redirect(url_for(".work_page", work_id=work_id))
+    # Starting a reread, or putting a work back on the TBR pile with some progress, offers a fresh start.
+    rereading = old == "completed" and new == "reading"
+    offer_reset = rereading or (new == "tbr" and bool(work["progress_current"]))
     reset = request.form.get("reset")
-    if old == "completed" and new == "reading" and reset not in ("yes", "no"):
-        return render_template("confirm_reread.html", work=work)
+    if offer_reset and reset not in ("yes", "no"):
+        return render_template("confirm_reset.html", work=work, new=new, rereading=rereading)
     with db() as c:
         add_status_change(c, work_id, old, new)
-        if reset == "yes" and old == "completed" and new == "reading":
+        if reset == "yes" and offer_reset:
             c.execute("UPDATE work SET progress_current = 0 WHERE id = ?", (work_id,))
     return redirect(url_for(".work_page", work_id=work_id) + "#latest")
 
@@ -539,6 +604,7 @@ def get_entry_or_404(entry_id):
     row = db().execute(
         """SELECT je.*, p.progress_valid, p.series_unit, u.abbrev AS entry_unit_abbrev, u.plural AS entry_unit_plural,
                   su.abbrev AS series_unit_abbrev, su.plural AS series_unit_plural, w.title AS work_title,
+                  w.length_total AS series_total,
                   sf.label AS from_label, st.label AS to_label
            FROM journal_entry je
            JOIN journal_entry_progress p ON p.entry_id = je.id
@@ -558,6 +624,13 @@ def entry_images(entry_id):
         """SELECT i.id, i.file_path, i.width, i.height, ji.position FROM journal_entry_image ji
            JOIN image i ON i.id = ji.image_id WHERE ji.entry_id = ? ORDER BY ji.position, i.id""",
         (entry_id,)).fetchall()
+
+
+def image_order(kept):
+    """IDs of the kept images in the order the form sent them; any it left out keep their place at the end."""
+    ids = [i["id"] for i in kept]
+    sent = [int(x) for x in request.form.getlist("image_order") if x.isdigit() and int(x) in ids]
+    return list(dict.fromkeys(sent + ids))
 
 
 @bp.route("/entries/<int:entry_id>/edit", methods=["GET", "POST"])
@@ -597,8 +670,10 @@ def entry_edit(entry_id):
                 for image_id in remove:
                     c.execute("DELETE FROM journal_entry_image WHERE entry_id = ? AND image_id = ?",
                               (entry_id, image_id))
-                start = max([i["position"] for i in kept], default=-1) + 1
-                attach_images(c, entry_id, uploads, start)
+                for pos, image_id in enumerate(image_order(kept)):
+                    c.execute("UPDATE journal_entry_image SET position = ? WHERE entry_id = ? AND image_id = ?",
+                              (pos, entry_id, image_id))
+                attach_images(c, entry_id, uploads, len(kept))
             else:
                 c.execute("UPDATE journal_entry SET body_md = ?, posted_at = ?, edited_at = ? WHERE id = ?",
                           (body or None, posted_at, now_utc(), entry_id))

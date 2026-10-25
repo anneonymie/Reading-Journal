@@ -7,14 +7,15 @@
 {{ errors_box(errors, conflicts) }}
 
 <form method="post" enctype="multipart/form-data" class="stack work-form">
+  <p class="hint"><span class="required" aria-hidden="true">*</span> Required</p>
   <label class="field">
-    <span>Title</span>
+    <span>Title <span class="required" aria-hidden="true">*</span></span>
     <input name="title" value="{{ form.title }}" required maxlength="300" autocomplete="off">
   </label>
 
   <div class="row">
     <label class="field">
-      <span>Format</span>
+      <span>Format <span class="required" aria-hidden="true">*</span></span>
       <select name="format_code" required data-format-select>
         <option value="" disabled {% if not form.format_code %}selected{% endif %}>Choose…</option>
         {% for f in formats %}
@@ -24,7 +25,7 @@
     </label>
     {% if not work %}
     <label class="field">
-      <span>Status</span>
+      <span>Reading status</span>
       <select name="status">
         {% for s in statuses %}
           <option value="{{ s.code }}" {% if form.status == s.code %}selected{% endif %}>{{ s.label }}</option>
@@ -76,7 +77,7 @@
   </label>
 
   {% macro creator_row(c, i) %}
-    <div class="creator-row" data-creator-row>
+    <div class="creator-row" data-repeat-row>
       <input name="creator_name" value="{{ c.name }}" maxlength="300" autocomplete="off"
              placeholder="Name" aria-label="Creator {{ i + 1 }} name">
       <span class="creator-roles">
@@ -86,7 +87,7 @@
       </span>
     </div>
   {% endmacro %}
-  <fieldset data-creators>
+  <fieldset class="repeat" data-repeat="+ Add another creator">
     <legend>Creators</legend>
     {% set blank = {"name": "", "author": false, "artist": false} %}
     {% set rows = form.creators or [blank] %}
@@ -95,48 +96,70 @@
     <noscript>{{ creator_row(blank, rows|length) }}</noscript>
   </fieldset>
 
-  <label class="field">
-    <span>Alternate titles <small>one per line</small></span>
-    <textarea name="alt_titles" rows="2">{{ form.alt_titles }}</textarea>
-  </label>
+  {# A box per value, with a button to add another. Without JavaScript, one spare box instead. #}
+  {% macro text_rows(name, values, label, extra="") %}
+    {% set values = values or [""] %}
+    {% for v in values %}
+      <div class="text-row" data-repeat-row>
+        <input name="{{ name }}" value="{{ v }}" maxlength="300" autocomplete="off" aria-label="{{ label }} {{ loop.index }}" {{ extra|safe }}>
+      </div>
+    {% endfor %}
+    <noscript>
+      <div class="text-row"><input name="{{ name }}" value="" maxlength="300" autocomplete="off" aria-label="{{ label }} {{ values|length + 1 }}" {{ extra|safe }}></div>
+    </noscript>
+  {% endmacro %}
+  <fieldset class="repeat" data-repeat="+ Add another title">
+    <legend>Alternate titles</legend>
+    {{ text_rows("alt_title", form.alt_titles, "Alternate title") }}
+  </fieldset>
 
-  <fieldset>
-    <legend>Publication</legend>
-    <div class="row">
-      <label class="field">
-        <span>Publisher</span>
-        <input name="publisher" value="{{ form.publisher }}" autocomplete="off">
-      </label>
-      <label class="field">
-        <span>Publishing status</span>
-        <select name="pub_status">
-          {% for code, label in pub_statuses %}
-            <option value="{{ code }}" {% if form.pub_status == code %}selected{% endif %}>{{ label }}</option>
+  {# A year box and a month list, stored together as "2019" or "2019-04". A value saved
+     before these existed that isn't in that form is kept until a year is picked. #}
+  {% macro partial_date(prefix, label) %}
+    <div class="field">
+      <span>{{ label }}</span>
+      <div class="date-parts">
+        <input name="{{ prefix }}_year" value="{{ form[prefix ~ '_year'] }}" type="number" min="1000" max="2999"
+               placeholder="Year" aria-label="{{ label }} year">
+        <select name="{{ prefix }}_month" aria-label="{{ label }} month">
+          <option value="">Month (optional)</option>
+          {% for name in ["January", "February", "March", "April", "May", "June", "July", "August",
+                          "September", "October", "November", "December"] %}
+            {% set m = "%02d"|format(loop.index) %}
+            <option value="{{ m }}" {% if form[prefix ~ '_month'] == m %}selected{% endif %}>{{ name }}</option>
           {% endfor %}
         </select>
-      </label>
+      </div>
+      {% if form[prefix ~ '_legacy'] %}
+        <input type="hidden" name="{{ prefix }}_legacy" value="{{ form[prefix ~ '_legacy'] }}">
+        <small>Saved as “{{ form[prefix ~ '_legacy'] }}”. Pick a year to replace it.</small>
+      {% endif %}
     </div>
+  {% endmacro %}
+  <fieldset>
+    <legend>Publication</legend>
+    <div class="field repeat" data-repeat="+ Add another publisher">
+      <span>Publishers</span>
+      {{ text_rows("publisher", form.publishers, "Publisher") }}
+    </div>
+    <label class="field">
+      <span>Publishing status</span>
+      <select name="pub_status">
+        {% for code, label in pub_statuses %}
+          <option value="{{ code }}" {% if form.pub_status == code %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <div class="row">
-      <label class="field">
-        <span>Started</span>
-        <input name="pub_start" value="{{ form.pub_start }}" placeholder="2019 or 2019-04" autocomplete="off">
-      </label>
-      <label class="field">
-        <span>Ended</span>
-        <input name="pub_end" value="{{ form.pub_end }}" placeholder="2023" autocomplete="off">
-      </label>
+      {{ partial_date("pub_start", "Started") }}
+      {{ partial_date("pub_end", "Ended") }}
     </div>
   </fieldset>
 
-  <fieldset>
+  <fieldset class="repeat" data-repeat="+ Add another link">
     <legend>Source links</legend>
-    <p class="hint">Paste the work's page link or its ID. Each ID can only belong to one work, which prevents duplicates.</p>
-    {% for s in sources %}
-    <label class="field">
-      <span>{{ s.name }}</span>
-      <input name="src_{{ s.code }}" value="{{ form['src_' ~ s.code] }}" autocomplete="off" spellcheck="false">
-    </label>
-    {% endfor %}
+    <p class="hint">Paste the link to the work's page on {% for s in sources %}{{ s.name }}{% if loop.revindex == 2 %} or {% elif not loop.last %}, {% endif %}{% endfor %}. A link can only belong to one work, which prevents duplicates.</p>
+    {{ text_rows("source_link", form.source_links, "Source link", 'spellcheck="false" inputmode="url"') }}
   </fieldset>
 
   <div class="actions">

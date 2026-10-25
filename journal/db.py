@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MIN_SQLITE = (3, 43, 0)
 
 
@@ -17,11 +17,30 @@ def _v2_to_v3(conn):
     conn.execute("DROP TRIGGER journal_progress_after_update")
 
 
+def _v3_to_v4(conn):
+    # A work can have several publishers: move each work's one publisher into the new tables.
+    conn.execute("""CREATE TABLE publisher (
+                        id    INTEGER PRIMARY KEY,
+                        name  TEXT NOT NULL UNIQUE COLLATE NOCASE
+                    ) STRICT""")
+    conn.execute("""CREATE TABLE work_publisher (
+                        work_id      INTEGER NOT NULL REFERENCES work(id) ON DELETE CASCADE,
+                        publisher_id INTEGER NOT NULL REFERENCES publisher(id) ON DELETE CASCADE,
+                        position     INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (work_id, publisher_id)
+                    ) STRICT""")
+    conn.execute("""INSERT OR IGNORE INTO publisher(name)
+                    SELECT trim(publisher) FROM work WHERE trim(coalesce(publisher, '')) <> '' ORDER BY id""")
+    conn.execute("""INSERT INTO work_publisher(work_id, publisher_id, position)
+                    SELECT w.id, p.id, 0 FROM work w JOIN publisher p ON p.name = trim(w.publisher)""")
+    conn.execute("ALTER TABLE work DROP COLUMN publisher")
+
+
 # Upgrade steps: MIGRATIONS[n](conn) takes a database from version n to n + 1.
 # All steps run in one transaction, so they must use conn.execute(), never
 # conn.executescript(), which commits part-way through.
 # old_schemas/ keeps each earlier schema.sql so tests can upgrade a real old database.
-MIGRATIONS = {2: _v2_to_v3}
+MIGRATIONS = {2: _v2_to_v3, 3: _v3_to_v4}
 
 
 class SetupError(RuntimeError):

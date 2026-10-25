@@ -11,6 +11,7 @@ A self-hosted reading journal for manga, novels and fanfic, replacing a Discord 
 - `test_schema.py`, `test_app.py`: tests for every rule in the requirements.
 - `seed.py`: builds sample data in `journal-demo/`.
 - `README.md`: user-facing instructions. Written for a non-programmer; keep it that way.
+- `thonks.md`: my informal list of to-dos and questions. Check it when we have no open tasks. Once something on it is decided, suggest moving it into the requirements.
 - `CHANGELOG.md`: what changed in each release, also written for a non-programmer. The app shows it at `/changelog`, so the Docker image includes it.
 
 ## App structure

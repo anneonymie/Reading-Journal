@@ -108,12 +108,12 @@ def test_add_work_with_everything():
     a = App()
     wid = a.add_work(title="Lantern", length_total="120", creator_name=["Mori", "mori", "Aki", "Ren"],
                      creator_author=["0", "1", "2"], creator_artist=["3"],
-                     alt_titles="Ranta\nLantern", src_anilist="https://anilist.co/manga/12345/Lantern",
-                     src_mangaupdates="https://www.mangaupdates.com/series/pm5ww2j/lantern",
-                     src_ao3="", cover=(png(), "cover.png"))
+                     alt_title=["Ranta", "Lantern", "ranta", ""],
+                     source_link=["https://anilist.co/manga/12345/Lantern",
+                                  "https://www.mangaupdates.com/series/pm5ww2j/lantern"], cover=(png(), "cover.png"))
     assert a.one("SELECT length_total FROM work WHERE id = ?", (wid,)) == 120
     assert a.one("SELECT COUNT(*) FROM work_creator WHERE work_id = ?", (wid,)) == 3   # duplicate Mori dropped
-    assert a.one("SELECT COUNT(*) FROM work_alt_title WHERE work_id = ?", (wid,)) == 1   # same as title dropped
+    assert a.one("SELECT COUNT(*) FROM work_alt_title WHERE work_id = ?", (wid,)) == 1   # same as title, repeat and blank dropped
     assert a.one("SELECT external_id FROM work_source_id WHERE source_code = 'anilist'") == "12345"
     assert a.one("SELECT external_id FROM work_source_id WHERE source_code = 'mangaupdates'") == "pm5ww2j"
     path = a.one("SELECT i.file_path FROM work w JOIN image i ON i.id = w.cover_image_id")
@@ -124,7 +124,7 @@ def test_add_work_with_everything():
 def test_work_page_header_and_details():
     a = App()
     wid = a.add_work(title="Lantern", format_code="manhwa", creator_name=["Mori", "Aki"],
-                     description_md="A *quiet* story.", alt_titles="Ranta")
+                     description_md="A *quiet* story.", alt_title=["Ranta"])
     page = a.client.get(f"/works/{wid}").get_data(as_text=True)
     head = re.search(r'<header class="work-head">(.*?)</header>', page, re.S).group(1)
     details = re.search(r"<summary>Details</summary>(.*?)</details>", page, re.S).group(1)
@@ -163,7 +163,7 @@ def test_edit_form_keeps_creators_and_roles():
     a = App()
     wid = a.add_work(creator_name=["Mori", "Asdf"], creator_author=["0"], creator_artist=["0"])
     form = a.client.get(f"/works/{wid}/edit").get_data(as_text=True)
-    shown, spare = form.split("<noscript>")
+    shown, spare = form.split("<noscript>")[:2]   # the first spare row is the creators'
     rows = re.findall(r'<div class="creator-row".*?</div>', shown, re.S)
     assert len(rows) == 2   # just the two people: no blank rows
     assert 'value="Mori"' in rows[0] and rows[0].count("checked") == 2 and "Role (optional):" in rows[0]
@@ -197,6 +197,70 @@ def test_creators_kept_when_form_has_errors():
     rows = re.findall(r'<div class="creator-row".*?</div>', r.get_data(as_text=True), re.S)
     assert r.status_code == 400 and 'value="Mori"' in rows[0] and rows[0].count("checked") == 1
 
+def test_alternate_titles_one_per_row():
+    a = App()
+    wid = a.add_work(alt_title=["Ranta", "Ranta no Hi"])
+    form = a.client.get(f"/works/{wid}/edit").get_data(as_text=True)
+    shown, spare = form.split('<legend>Alternate titles</legend>')[1].split("<noscript>")[:2]
+    assert re.findall(r'name="alt_title" value="([^"]*)"', shown) == ["Ranta", "Ranta no Hi"]
+    assert 'name="alt_title" value=""' in spare   # one blank row for adding without JavaScript
+    assert a.client.get("/works/new").get_data(as_text=True).count('name="alt_title" value=""') == 2   # row + spare
+
+def work_dates(a, wid):
+    conn = a.db()
+    try:
+        return tuple(conn.execute("SELECT pub_start, pub_end FROM work WHERE id = ?", (wid,)).fetchone())
+    finally:
+        conn.close()
+
+def test_publication_dates_from_year_and_month():
+    a = App()
+    wid = a.add_work(pub_start_year="2019", pub_start_month="04", pub_end_year="2023")
+    assert work_dates(a, wid) == ("2019-04", "2023")
+    form = a.client.get(f"/works/{wid}/edit").get_data(as_text=True)
+    assert 'name="pub_start_year" value="2019"' in form and '<option value="04" selected>April' in form
+    # Started April 2019, Ended 2019 is fine: only the year is known for the end
+    a.client.post(f"/works/{wid}/edit", data={"title": "T", "format_code": "manga", "pub_start_year": "2019",
+                  "pub_start_month": "04", "pub_end_year": "2019"}, content_type="multipart/form-data")
+    assert work_dates(a, wid) == ("2019-04", "2019")
+
+def test_publication_date_mistakes_rejected():
+    a = App()
+    for data, message in [({"pub_start_month": "04"}, "add a year to go with the month"),
+                          ({"pub_start_year": "19"}, "four digits"),
+                          ({"pub_start_year": "2020", "pub_end_year": "2019"}, "Ended can&#39;t be before Started"),
+                          ({"pub_start_year": "2020", "pub_start_month": "05",
+                            "pub_end_year": "2020", "pub_end_month": "03"}, "Ended can&#39;t be before Started")]:
+        r = a.client.post("/works/new", data={"title": "x", "format_code": "manga", "status": "tbr", **data})
+        assert r.status_code == 400 and message in r.get_data(as_text=True), data
+    assert a.one("SELECT COUNT(*) FROM work") == 0
+
+def test_old_free_text_publication_date_kept():
+    a = App()
+    wid = a.add_work()
+    conn = a.db()
+    with conn:
+        conn.execute("UPDATE work SET pub_start = 'Spring 2019' WHERE id = ?", (wid,))
+    conn.close()
+    form = a.client.get(f"/works/{wid}/edit").get_data(as_text=True)
+    assert "Saved as “Spring 2019”" in form
+    legacy = re.search(r'name="pub_start_legacy" value="([^"]*)"', form).group(1)
+    base = {"title": "T", "format_code": "manga", "pub_start_legacy": legacy}
+    a.client.post(f"/works/{wid}/edit", data=base, content_type="multipart/form-data")
+    assert work_dates(a, wid) == ("Spring 2019", None)   # saving without a year keeps it
+    a.client.post(f"/works/{wid}/edit", data={**base, "pub_start_year": "2019"}, content_type="multipart/form-data")
+    assert work_dates(a, wid) == ("2019", None)          # picking a year replaces it
+
+def test_work_page_year_and_open_sections():
+    a = App()
+    wid = a.add_work(title="Wolf in the House", pub_start_year="2017", pub_start_month="06")
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    assert '<h1>Wolf in the House <span class="work-year">(2017)</span></h1>' in page
+    assert page.count('<details class="panel" open>') == 3   # notes, review and details
+    assert "Reading status" in page
+    no_year = a.add_work(title="Undated")
+    assert "<h1>Undated</h1>" in a.client.get(f"/works/{no_year}").get_data(as_text=True)
+
 def test_new_work_logs_initial_status():
     a = App()
     wid = a.add_work(status="tbr")
@@ -220,18 +284,72 @@ def test_work_form_validation_keeps_input():
 
 def test_duplicate_source_id_rejected_with_link():
     a = App()
-    first = a.add_work(title="First", src_anilist="555")
+    first = a.add_work(title="First", source_link=["https://anilist.co/manga/555"])
     r = a.client.post("/works/new", data={"title": "Second", "format_code": "manga", "status": "tbr",
-                                          "src_anilist": "anilist.co/manga/555"})
+                                          "source_link": ["anilist.co/manga/555"]})
     body = r.get_data(as_text=True)
     assert r.status_code == 400 and f"/works/{first}" in body and "already used by" in body
     assert a.one("SELECT COUNT(*) FROM work") == 1
 
-def test_bad_source_link_rejected():
+def test_source_links_recognised_by_site():
     a = App()
-    r = a.client.post("/works/new", data={"title": "x", "format_code": "manga", "status": "tbr",
-                                          "src_ao3": "https://example.com/works/1"})
-    assert r.status_code == 400 and "AO3" in r.get_data(as_text=True)
+    wid = a.add_work(source_link=["https://archiveofourown.org/works/42/chapters/7", "",
+                                  "https://www.mangaupdates.com/series/pm5ww2j/lantern"])
+    conn = a.db()
+    try:
+        assert dict(conn.execute("SELECT source_code, external_id FROM work_source_id WHERE work_id = ?",
+                                 (wid,)).fetchall()) == {"ao3": "42", "mangaupdates": "pm5ww2j"}
+    finally:
+        conn.close()
+    # the edit form shows them as links, in site order
+    form = a.client.get(f"/works/{wid}/edit").get_data(as_text=True)
+    assert re.findall(r'name="source_link" value="([^"]+)"', form) == [
+        "https://www.mangaupdates.com/series/pm5ww2j", "https://archiveofourown.org/works/42"]
+
+def test_bad_source_links_rejected():
+    a = App()
+    for links, message in [(["https://example.com/works/1"], "isn&#39;t a link to a work on AniList, MangaUpdates or AO3"),
+                           (["555"], "Paste the whole link"),   # a bare number could be from any site
+                           (["https://anilist.co/manga/1", "https://anilist.co/manga/2"], "only have one AniList link")]:
+        r = a.client.post("/works/new", data={"title": "x", "format_code": "manga", "status": "tbr", "source_link": links})
+        body = r.get_data(as_text=True)
+        assert r.status_code == 400 and message in body, links
+        assert all(f'value="{link}"' in body for link in links)   # what was typed is kept
+    # the same link twice is just a repeat, not a conflict
+    a.add_work(source_link=["https://anilist.co/manga/1", "anilist.co/manga/1"])
+    assert a.one("SELECT COUNT(*) FROM work_source_id") == 1
+
+def work_publisher_names(a, wid):
+    conn = a.db()
+    try:
+        return [r[0] for r in conn.execute("""SELECT p.name FROM work_publisher wp JOIN publisher p ON p.id = wp.publisher_id
+                                              WHERE wp.work_id = ? ORDER BY wp.position""", (wid,))]
+    finally:
+        conn.close()
+
+def test_several_publishers():
+    a = App()
+    wid = a.add_work(publisher=["Kodansha", "", "Yen Press", "kodansha"])
+    assert work_publisher_names(a, wid) == ["Kodansha", "Yen Press"]   # in order, repeats dropped
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    assert "<dt>Publishers</dt><dd>Kodansha<br>Yen Press</dd>" in page
+    form = a.client.get(f"/works/{wid}/edit").get_data(as_text=True)
+    assert re.findall(r'name="publisher" value="([^"]+)"', form) == ["Kodansha", "Yen Press"]
+    # a second work shares the publisher, whatever the capitals
+    other = a.add_work(publisher=["KODANSHA"])
+    assert work_publisher_names(a, other) == ["Kodansha"] and a.one("SELECT COUNT(*) FROM publisher") == 2
+    # reordering and removing
+    a.client.post(f"/works/{wid}/edit", data={"title": "T", "format_code": "manga", "publisher": ["Yen Press"]},
+                  content_type="multipart/form-data")
+    assert work_publisher_names(a, wid) == ["Yen Press"]
+    assert "<dt>Publisher</dt><dd>Yen Press</dd>" in a.client.get(f"/works/{wid}").get_data(as_text=True)
+
+def test_required_fields_marked():
+    a = App()
+    form = a.client.get("/works/new").get_data(as_text=True)
+    assert 'Title <span class="required" aria-hidden="true">*</span>' in form
+    assert 'Format <span class="required" aria-hidden="true">*</span>' in form
+    assert form.count('class="required"') == 3   # the two fields and the key
 
 def test_not_an_image_rejected():
     a = App()
@@ -243,10 +361,10 @@ def test_not_an_image_rejected():
 
 def test_edit_work_and_unit_change_clears_progress():
     a = App()
-    wid = a.add_work(src_anilist="1")
+    wid = a.add_work(source_link=["https://anilist.co/manga/1"])
     a.post_entry(wid, body="hi", progress="12")
     r = a.client.post(f"/works/{wid}/edit", data={"title": "Renamed", "format_code": "manga",
-                                                  "length_unit": "volume", "src_anilist": "1"},
+                                                  "length_unit": "volume", "source_link": ["https://anilist.co/manga/1"]},
                       content_type="multipart/form-data", follow_redirects=True)
     body = r.get_data(as_text=True)
     assert r.status_code == 200 and "Renamed" in body and "cleared" in body
@@ -373,6 +491,55 @@ def test_edit_entry_rules():
                                                     "remove_image": str(rows[0][0])}, content_type="multipart/form-data")
     assert r.status_code == 400
 
+def entry_image_ids(a, eid):
+    conn = a.db()
+    try:
+        return [r[0] for r in conn.execute(
+            "SELECT image_id FROM journal_entry_image WHERE entry_id = ? ORDER BY position", (eid,))]
+    finally:
+        conn.close()
+
+def test_edit_entry_reorders_images():
+    a = App()
+    wid = a.add_work()
+    a.post_entry(wid, body="x", images=[(png((1, 1, 1)), "a.png"), (png((2, 2, 2)), "b.png"), (png((3, 3, 3)), "c.png")])
+    eid = a.one("SELECT id FROM journal_entry WHERE kind = 'note'")
+    first, second, third = entry_image_ids(a, eid)
+    page = a.client.get(f"/entries/{eid}/edit").get_data(as_text=True)
+    assert re.findall(r'name="image_order" value="(\d+)"', page) == [str(first), str(second), str(third)]
+    # move the last image to the front and add a new one, which goes at the end
+    a.client.post(f"/entries/{eid}/edit", data={"body": "x", "image_order": [str(third), str(first), str(second)],
+                                                "images": [(png((4, 4, 4)), "d.png")]}, content_type="multipart/form-data")
+    order = entry_image_ids(a, eid)
+    assert order[:3] == [third, first, second] and len(order) == 4
+    # removing one keeps the others in order
+    a.client.post(f"/entries/{eid}/edit", data={"body": "x", "image_order": [str(i) for i in order],
+                                                "remove_image": str(first)}, content_type="multipart/form-data")
+    assert entry_image_ids(a, eid) == [third, second, order[3]]
+
+def test_edit_entry_page_layout():
+    a = App()
+    wid = a.add_work(length_total="55")
+    a.post_entry(wid, body="x", progress="12")
+    eid = a.one("SELECT id FROM journal_entry WHERE kind = 'note'")
+    page = a.client.get(f"/entries/{eid}/edit").get_data(as_text=True)
+    assert "<h1>Edit Journal Entry</h1>" in page and "of 55 chapters" in page
+    assert "+ Add images" in page.split("<legend>Images</legend>")[1].split("</fieldset>")[0]   # inside the box
+    assert "You can use Markdown to format your entry" in page
+    # no total: a question mark instead
+    other = a.add_work()
+    a.post_entry(other, body="y", progress="3")
+    eid = a.one("SELECT id FROM journal_entry WHERE kind = 'note' AND work_id = ?", (other,))
+    assert "of ? chapters" in a.client.get(f"/entries/{eid}/edit").get_data(as_text=True)
+
+def test_format_reference_matches_rendering():
+    a = App()
+    wid = a.add_work()
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    help_box = page.split('<details class="format-help">')[1].split("</details>")[0]
+    assert "<code>**bold**</code>" in help_box and "<strong>bold</strong>" in help_box
+    assert "<s>strikethrough</s>" in help_box and "<hr" in help_box
+
 def test_delete_entry_keeps_progress():
     a = App()
     wid = a.add_work()
@@ -450,6 +617,34 @@ def test_paused_to_reading_no_prompt():
     wid = a.add_work(status="paused")
     r = a.client.post(f"/works/{wid}/status", data={"status": "reading"})
     assert r.status_code == 302
+
+def test_back_to_tbr_offers_reset():
+    a = App()
+    wid = a.add_work(status="reading")
+    a.post_entry(wid, body="x", progress="20")
+    r = a.client.post(f"/works/{wid}/status", data={"status": "tbr"})
+    assert r.status_code == 200 and "Reset progress to 0" in r.get_data(as_text=True)
+    assert a.one("SELECT status_code FROM work_current_status WHERE work_id = ?", (wid,)) == "reading"   # nothing yet
+    a.client.post(f"/works/{wid}/status", data={"status": "tbr", "reset": "yes"})
+    assert a.one("SELECT status_code FROM work_current_status WHERE work_id = ?", (wid,)) == "tbr"
+    assert a.one("SELECT progress_current FROM work WHERE id = ?", (wid,)) == 0
+
+def test_back_to_tbr_keep_progress():
+    a = App()
+    wid = a.add_work(status="dropped")
+    a.client.post(f"/works/{wid}/progress", data={"progress": "7"})
+    a.client.post(f"/works/{wid}/status", data={"status": "tbr", "reset": "no"})
+    assert a.one("SELECT progress_current FROM work WHERE id = ?", (wid,)) == 7
+    assert a.one("SELECT status_code FROM work_current_status WHERE work_id = ?", (wid,)) == "tbr"
+
+def test_back_to_tbr_without_progress_no_prompt():
+    a = App()
+    wid = a.add_work(status="reading")
+    assert a.client.post(f"/works/{wid}/status", data={"status": "tbr"}).status_code == 302
+    # a reset answer sent for a change that doesn't offer one is ignored
+    a.client.post(f"/works/{wid}/progress", data={"progress": "5"})
+    a.client.post(f"/works/{wid}/status", data={"status": "paused", "reset": "yes"})
+    assert a.one("SELECT progress_current FROM work WHERE id = ?", (wid,)) == 5
 
 def test_deleting_status_entry_keeps_status():
     a = App()
@@ -662,10 +857,57 @@ def test_upgrade_from_v2_journal():
     a.client.post(f"/entries/{eid}/edit", data={"body": "old", "progress": "65"}, content_type="multipart/form-data")
     assert a.one("SELECT progress_current FROM work WHERE id = 1") == 0
 
+def test_upgrade_from_v3_journal_moves_publishers():
+    def old_data(conn):
+        conn.executemany("INSERT INTO work(id, title, format_code, publisher) VALUES (?, ?, 'manga', ?)",
+                         [(1, "One", "Kodansha"), (2, "Two", " kodansha "), (3, "Three", None), (4, "Four", "")])
+    a = App(old_schema="schema_v3.sql", before=old_data)
+    assert a.one("PRAGMA user_version") == V and len(backups(a)) == 1
+    assert work_publisher_names(a, 1) == ["Kodansha"] and work_publisher_names(a, 2) == ["Kodansha"]
+    assert work_publisher_names(a, 3) == [] and work_publisher_names(a, 4) == []
+    assert a.one("SELECT COUNT(*) FROM publisher") == 1
+    # same tables, views, triggers and columns as a brand-new journal
+    objects = "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY 1, 2"
+    columns = "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?)"
+    fresh = App()
+    conn, new_conn = a.db(), fresh.db()
+    try:
+        assert conn.execute(objects).fetchall() == new_conn.execute(objects).fetchall()
+        for table in ("work", "publisher", "work_publisher"):
+            assert conn.execute(columns, (table,)).fetchall() == new_conn.execute(columns, (table,)).fetchall(), table
+    finally:
+        conn.close()
+        new_conn.close()
+    assert "<dt>Publisher</dt><dd>Kodansha</dd>" in a.client.get("/works/2").get_data(as_text=True)
+
 def test_up_to_date_database_not_backed_up():
     a = App()
     dbmod.init_db(a.app.config["DB_PATH"])
     assert backups(a) == []
+
+
+# ---------------------------------------------------------------- dev mode
+
+def test_dev_mode_uses_demo_journal():
+    import run
+    data_dir, port = run.dev_settings({})
+    assert data_dir.name == "journal-demo" and port == 8420
+    assert run.dev_settings({"JOURNAL_DATA": "elsewhere"})[0] == Path("elsewhere")
+
+def test_dev_mode_rereads_templates():
+    import run
+    with tempfile.TemporaryDirectory() as tmp:
+        assert run.dev_app(tmp).jinja_env.auto_reload
+
+def test_dev_mode_shows_error_instead_of_stopping():
+    import run
+    with tempfile.TemporaryDirectory() as tmp:
+        not_a_folder = Path(tmp) / "file.txt"
+        not_a_folder.write_text("x")
+        app = run.dev_app(not_a_folder)   # create_app can't make a data folder here
+        statuses = []
+        body = b"".join(app({}, lambda status, headers: statuses.append(status)))
+    assert statuses[0].startswith("500") and b"couldn't start" in body
 
 
 if __name__ == "__main__":

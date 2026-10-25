@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% from "_macros.html" import errors_box %}
-{% block title %}Edit entry | Reading Journal{% endblock %}
+{% from "_macros.html" import errors_box, format_help %}
+{% block title %}Edit Journal Entry | Reading Journal{% endblock %}
 {% block main_class %}narrow{% endblock %}
 {% block content %}
 <p class="crumb"><a href="{{ url_for('journal.work_page', work_id=entry.work_id) }}#entry-{{ entry.id }}">{{ entry.work_title }}</a></p>
-<h1>Edit entry</h1>
+<h1>Edit Journal Entry</h1>
 {{ errors_box(errors) }}
 
 <form method="post" enctype="multipart/form-data" class="stack">
@@ -21,40 +21,51 @@
   </label>
 
   {% if entry.kind == 'note' %}
-    {% if images %}
     <fieldset>
       <legend>Images</legend>
-      <div class="edit-shots">
+      {% if images %}
+      {# Each image carries a hidden image_order field; moving an image moves its field, so the saved order follows. #}
+      <div class="edit-shots" data-reorder>
         {% for i in images %}
-          <label class="edit-shot">
-            <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="Image" loading="lazy">
-            <span><input type="checkbox" name="remove_image" value="{{ i.id }}"> Remove</span>
-          </label>
+          <div class="edit-shot" data-reorder-item>
+            <input type="hidden" name="image_order" value="{{ i.id }}">
+            <label>
+              <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="Image {{ loop.index }}" loading="lazy">
+              <span><input type="checkbox" name="remove_image" value="{{ i.id }}"> Remove</span>
+            </label>
+          </div>
         {% endfor %}
       </div>
+      {% endif %}
+      <div class="previews" data-previews hidden></div>
+      <label class="attach">
+        <input type="file" name="images" accept="image/*" multiple data-image-input>
+        <span>+ Add images</span>
+      </label>
+      {% if images %}<p class="hint">New images go after the ones already here.</p>{% endif %}
     </fieldset>
-    {% endif %}
-    <div class="previews" data-previews hidden></div>
-    <label class="attach">
-      <input type="file" name="images" accept="image/*" multiple data-image-input>
-      <span>Add images</span>
-    </label>
 
-    <label class="field short">
-      <span>Progress ({{ entry.entry_unit_plural or entry.series_unit_plural }})</span>
-      <input name="progress" value="{{ form.progress }}" inputmode="decimal" autocomplete="off">
-    </label>
-    {% if entry.progress_value is not none and not entry.progress_valid %}
+    {% set unit = entry.entry_unit_plural or entry.series_unit_plural %}
+    {% set same_unit = entry.progress_value is none or entry.progress_valid %}
+    <div class="field">
+      <label for="progress">Progress</label>
+      <div class="inline">
+        <input id="progress" name="progress" value="{{ form.progress }}" inputmode="decimal" autocomplete="off">
+        <span class="unit">of {{ entry.series_total|num if same_unit and entry.series_total else "?" }} {{ unit }}</span>
+      </div>
+    </div>
+    {% if not same_unit %}
       <p class="hint">This entry counts in {{ entry.entry_unit_plural }}, but the work is counted in {{ entry.series_unit_plural }}, so its progress is ignored.</p>
     {% else %}
       <p class="hint">Editing an entry doesn't change the work's progress. To change that, use Progress on the work's page.</p>
     {% endif %}
   {% endif %}
 
-  <label class="field">
+  <label class="field medium">
     <span>Posted at</span>
     <input name="posted_at" class="js-utc" value="{{ form.posted_at }}" autocomplete="off">
   </label>
+  {{ format_help() }}
 
   <div class="actions">
     <button type="submit">Save changes</button>

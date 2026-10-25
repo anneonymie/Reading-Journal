@@ -62,14 +62,15 @@
     apply();
   }
 
-  // Creators: a button that adds a blank row. Each row's tick boxes carry its row number.
-  document.querySelectorAll("[data-creators]").forEach((set) => {
+  // Repeating rows (creators, alternate titles): a button that adds a blank copy of the last row.
+  // Each creator row's tick boxes carry its row number.
+  document.querySelectorAll("[data-repeat]").forEach((set) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary";
-    button.textContent = "+ Add another creator";
+    button.textContent = set.dataset.repeat;
     button.addEventListener("click", () => {
-      const rows = set.querySelectorAll("[data-creator-row]");
+      const rows = set.querySelectorAll("[data-repeat-row]");
       const row = rows[rows.length - 1].cloneNode(true);
       row.querySelectorAll("input").forEach((input) => {
         if (input.type === "checkbox") {
@@ -77,13 +78,48 @@
           input.value = String(rows.length);
         } else {
           input.value = "";
-          input.setAttribute("aria-label", `Creator ${rows.length + 1} name`);
+          const label = input.getAttribute("aria-label");
+          if (label) input.setAttribute("aria-label", label.replace(/\d+/, String(rows.length + 1)));
         }
       });
       button.before(row);
       row.querySelector("input").focus();
     });
     set.appendChild(button);
+  });
+
+  // Left and right buttons for putting images in order.
+  const moveButtons = (index, count, move) => {
+    const box = document.createElement("span");
+    box.className = "move";
+    [[-1, "←", "Move earlier"], [1, "→", "Move later"]].forEach(([step, text, label]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "secondary";
+      b.textContent = text;
+      b.setAttribute("aria-label", label);
+      b.disabled = index + step < 0 || index + step >= count;
+      b.addEventListener("click", () => move(step));
+      box.appendChild(b);
+    });
+    return box;
+  };
+
+  // Images already saved on an entry. Each carries a hidden field, so the saved order follows the page.
+  document.querySelectorAll("[data-reorder]").forEach((list) => {
+    const draw = () => {
+      const items = Array.from(list.querySelectorAll("[data-reorder-item]"));
+      items.forEach((item, index) => {
+        item.querySelector(".move")?.remove();
+        item.appendChild(moveButtons(index, items.length, (step) => {
+          const other = items[index + step];
+          if (step < 0) other.before(item); else other.after(item);
+          draw();
+          item.querySelector(`.move button:nth-child(${step < 0 ? 1 : 2})`)?.focus();
+        }));
+      });
+    };
+    draw();
   });
 
   // Images: paste, drop or pick; preview them and allow removal before posting.
@@ -118,6 +154,12 @@
           remove.setAttribute("aria-label", `Remove ${file.name || "image"}`);
           remove.addEventListener("click", () => { files.splice(index, 1); sync(); });
           box.appendChild(remove);
+          if (files.length > 1) {
+            box.appendChild(moveButtons(index, files.length, (step) => {
+              [files[index], files[index + step]] = [files[index + step], files[index]];
+              sync();
+            }));
+          }
         }
         previews.appendChild(box);
       });

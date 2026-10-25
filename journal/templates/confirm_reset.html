@@ -1,11 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Start a reread? | Reading Journal{% endblock %}
+{% block title %}{{ "Start a reread?" if rereading else "Reset progress?" }} | Reading Journal{% endblock %}
 {% block main_class %}narrow{% endblock %}
 {% block content %}
+{% if rereading %}
 <h1>Starting a reread of {{ work.title }}?</h1>
 <p>You're moving it from Completed back to Currently Reading. Do you want to reset progress to 0, so your journal entries move it forward again from the start?</p>
+{% else %}
+<h1>Reset progress on {{ work.title }}?</h1>
+<p>You're moving it to TBR, and it's at {{ work.unit_abbrev }} {{ work.progress_current|num }}. Do you want to reset progress to 0, so you start from the beginning next time?</p>
+{% endif %}
 <form method="post" action="{{ url_for('journal.work_status', work_id=work.id) }}" class="actions">
-  <input type="hidden" name="status" value="reading">
+  <input type="hidden" name="status" value="{{ new }}">
   <button type="submit" name="reset" value="yes">Reset progress to 0</button>
   <button type="submit" name="reset" value="no" class="secondary">Keep progress</button>
   <a href="{{ url_for('journal.work_page', work_id=work.id) }}">Cancel</a>

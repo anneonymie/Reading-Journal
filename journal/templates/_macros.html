@@ -17,6 +17,24 @@
 {% endif %}
 {% endmacro %}
 
+{# Each example is rendered by the same Markdown code as entries, so the reference can't drift. #}
+{% macro format_help() %}
+<details class="format-help">
+  <summary>You can use Markdown to format your entry</summary>
+  <table>
+    <thead><tr><th>Type</th><th>To get</th></tr></thead>
+    <tbody>
+      {% for example in ["**bold**", "*italic*", "~~strikethrough~~", "### Heading", "> quote",
+                         "- list item", "1. numbered item", "[link text](https://example.com)",
+                         "`code`", "---"] %}
+        <tr><td><code>{{ example }}</code></td><td class="prose">{{ example|md }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">Pressing Enter once starts a new line. Leave a blank line to start a new paragraph.</p>
+</details>
+{% endmacro %}
+
 {% macro cover(path, title, cls="cover") %}
 {% if path %}
   <img class="{{ cls }}" src="{{ url_for('journal.media', rel=path) }}" alt="Cover of {{ title }}" loading="lazy">

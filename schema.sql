@@ -119,7 +119,6 @@ CREATE TABLE work (
     format_code      TEXT NOT NULL REFERENCES format(code),
     description_md   TEXT,
     cover_image_id   INTEGER REFERENCES image(id) ON DELETE SET NULL,
-    publisher        TEXT,
     pub_start        TEXT,                 -- date or partial date: '2019' or '2019-04'
     pub_end          TEXT,
     pub_status       TEXT CHECK (pub_status IN ('ongoing','completed','hiatus','cancelled')),
@@ -167,6 +166,20 @@ CREATE TABLE work_creator (
     creator_id INTEGER NOT NULL REFERENCES creator(id) ON DELETE CASCADE,
     role       TEXT NOT NULL DEFAULT 'author',   -- author (shown as Writer), artist, unspecified, translator, original creator
     PRIMARY KEY (work_id, creator_id, role)
+) STRICT;
+
+-- Publishers are shared between works, like creators. A work lists them in
+-- the order they were entered (e.g. the original publisher, then a licensor).
+CREATE TABLE publisher (
+    id    INTEGER PRIMARY KEY,
+    name  TEXT NOT NULL UNIQUE COLLATE NOCASE
+) STRICT;
+
+CREATE TABLE work_publisher (
+    work_id      INTEGER NOT NULL REFERENCES work(id) ON DELETE CASCADE,
+    publisher_id INTEGER NOT NULL REFERENCES publisher(id) ON DELETE CASCADE,
+    position     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (work_id, publisher_id)
 ) STRICT;
 
 -- Source IDs: one ID per source per work, and an ID can't be on two works
@@ -636,4 +649,4 @@ CREATE TABLE app_setting (
 ) STRICT;
 
 -- Schema version, for future migrations
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;

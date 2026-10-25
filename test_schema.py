@@ -391,7 +391,7 @@ def test_integrity():
     db = new_db()
     assert one(db, "PRAGMA integrity_check") == "ok"
     assert db.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert one(db, "PRAGMA user_version") == 3
+    assert one(db, "PRAGMA user_version") == 4
 
 
 if __name__ == "__main__":

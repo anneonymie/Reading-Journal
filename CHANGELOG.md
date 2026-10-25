@@ -3,6 +3,8 @@ Updates to the Reading Journal app. The current app version appears at the botto
 
 ## Unreleased
 
+## 0.3.0 (2026-10-25)
+
 - New `dev.bat` for working on the app: it opens the sample journal and restarts by itself when the code changes, so there's no need to restart it by hand.
 - Journal: horizontal lines (`---`) are now a subtle gray.
 - Journal: a "You can use Markdown to format your entry" reference under the new entry box and on Edit Journal Entry, showing how to bold, italicize and more.

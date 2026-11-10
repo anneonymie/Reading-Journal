@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Credits | Reading Journal{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<div class="prose">
+  <h1>Credits</h1>
+  <p>Reading Journal uses work by other people, shared under these licences.</p>
+
+  <h2>Notebook logo</h2>
+  <p>The notebook icon by EmojiOne, recolored, licensed under
+    <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
+
+  <h2>Zen Maru Gothic</h2>
+  <p>The heading font, by <a href="https://github.com/googlefonts/zen-marugothic">the Zen Maru Gothic Authors</a>, licensed under the
+    <a href="{{ url_for('static', filename='fonts/OFL-zen-maru-gothic.txt') }}">SIL Open Font License 1.1</a>.</p>
+
+  <h2>SortableJS</h2>
+  <p>Drag-and-drop ordering of images, by <a href="https://github.com/SortableJS/Sortable">all contributors to Sortable</a>,
+    licensed under the <a href="{{ url_for('static', filename='MIT-sortablejs.txt') }}">MIT License</a>.</p>
+</div>
+{% endblock %}

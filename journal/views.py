@@ -549,15 +549,19 @@ def work_notes(work_id):
 
 # ------------------------------------------------------------------ journal entries
 
-def attach_images(c, entry_id, uploads, start=0):
-    pos = start
-    for up in uploads:
-        image_id = store_image(c, current_app.config["DATA_DIR"], up)
-        if image_id:
-            c.execute("INSERT OR IGNORE INTO journal_entry_image(entry_id, image_id, position) VALUES (?,?,?)",
-                      (entry_id, image_id, pos))
-            pos += 1
-    return pos - start
+def place_images(c, entry_id, image_ids):
+    """Give the entry exactly these images' positions, in this order, adding any it doesn't have yet.
+    An image listed twice (the same file uploaded again) keeps its first place."""
+    pos = 0
+    for image_id in dict.fromkeys(i for i in image_ids if i):
+        c.execute("""INSERT INTO journal_entry_image(entry_id, image_id, position) VALUES (?,?,?)
+                     ON CONFLICT(entry_id, image_id) DO UPDATE SET position = excluded.position""",
+                  (entry_id, image_id, pos))
+        pos += 1
+
+
+def store_uploads(c, uploads):
+    return [store_image(c, current_app.config["DATA_DIR"], up) for up in uploads]
 
 
 def read_posted_at(errors):
@@ -593,7 +597,7 @@ def entry_create(work_id):
                 (work_id, body or None, posted_at, progress,
                  work["length_unit"] if progress is not None else None),
             ).lastrowid
-            attach_images(c, entry_id, uploads)
+            place_images(c, entry_id, store_uploads(c, uploads))
     except ImageError as e:
         return render_work(work_id, composer=composer,
                            errors=[f"{e} Nothing was posted; attach the images again."], status=400)
@@ -626,11 +630,17 @@ def entry_images(entry_id):
         (entry_id,)).fetchall()
 
 
-def image_order(kept):
-    """IDs of the kept images in the order the form sent them; any it left out keep their place at the end."""
+def image_order(kept, new_count):
+    """The entry's images in the order the form sent them. Kept images are their ids; uploads are
+    ("new", n) for the n-th uploaded file, sent as "new:n". Anything left out goes at the end."""
     ids = [i["id"] for i in kept]
-    sent = [int(x) for x in request.form.getlist("image_order") if x.isdigit() and int(x) in ids]
-    return list(dict.fromkeys(sent + ids))
+    sent = []
+    for x in request.form.getlist("image_order"):
+        if x.isdigit() and int(x) in ids:
+            sent.append(int(x))
+        elif x.startswith("new:") and x[4:].isdigit() and int(x[4:]) < new_count:
+            sent.append(("new", int(x[4:])))
+    return list(dict.fromkeys(sent + ids + [("new", n) for n in range(new_count)]))
 
 
 @bp.route("/entries/<int:entry_id>/edit", methods=["GET", "POST"])
@@ -670,10 +680,9 @@ def entry_edit(entry_id):
                 for image_id in remove:
                     c.execute("DELETE FROM journal_entry_image WHERE entry_id = ? AND image_id = ?",
                               (entry_id, image_id))
-                for pos, image_id in enumerate(image_order(kept)):
-                    c.execute("UPDATE journal_entry_image SET position = ? WHERE entry_id = ? AND image_id = ?",
-                              (pos, entry_id, image_id))
-                attach_images(c, entry_id, uploads, len(kept))
+                new_ids = store_uploads(c, uploads)
+                place_images(c, entry_id, [new_ids[x[1]] if isinstance(x, tuple) else x
+                                           for x in image_order(kept, len(uploads))])
             else:
                 c.execute("UPDATE journal_entry SET body_md = ?, posted_at = ?, edited_at = ? WHERE id = ?",
                           (body or None, posted_at, now_utc(), entry_id))
@@ -706,6 +715,11 @@ def hide_empty_unreleased(text):
 def changelog():
     text = hide_empty_unreleased(CHANGELOG_PATH.read_text(encoding="utf-8"))
     return render_template("changelog.html", text=text)
+
+
+@bp.get("/credits")
+def credits():
+    return render_template("credits.html")
 
 
 @bp.get("/media/<path:rel>")

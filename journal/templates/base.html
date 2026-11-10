@@ -6,6 +6,7 @@
   <title>{% block title %}Reading Journal{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='emojione-notebook.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='Sortable.min.js') }}" defer></script>
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
 <body>
@@ -31,8 +32,7 @@
       <a href="{{ url_for('journal.library') }}">Library</a>
       <a href="{{ url_for('journal.work_new') }}">Add Work</a>
     </nav>
-    <p>Reading Journal {{ app_version }} • <a href="{{ url_for('journal.changelog') }}">Changelog</a></p>
-    <p>Notebook logo by EmojiOne, recolored, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a></p>
+    <p>Reading Journal {{ app_version }} • <a href="{{ url_for('journal.changelog') }}">Changelog</a> • <a href="{{ url_for('journal.credits') }}">Credits</a></p>
   </footer>
 </body>
 </html>

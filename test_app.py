@@ -256,7 +256,7 @@ def test_work_page_year_and_open_sections():
     wid = a.add_work(title="Wolf in the House", pub_start_year="2017", pub_start_month="06")
     page = a.client.get(f"/works/{wid}").get_data(as_text=True)
     assert '<h1>Wolf in the House <span class="work-year">(2017)</span></h1>' in page
-    assert page.count('<details class="panel" open>') == 3   # notes, review and details
+    assert page.count('<details class="panel" open') == 3   # notes, review and details
     assert "Reading status" in page
     no_year = a.add_work(title="Undated")
     assert "<h1>Undated</h1>" in a.client.get(f"/works/{no_year}").get_data(as_text=True)
@@ -517,6 +517,39 @@ def test_edit_entry_reorders_images():
                                                 "remove_image": str(first)}, content_type="multipart/form-data")
     assert entry_image_ids(a, eid) == [third, second, order[3]]
 
+def test_edit_entry_places_new_images_among_saved_ones():
+    a = App()
+    wid = a.add_work()
+    a.post_entry(wid, body="x", images=[(png((1, 1, 1)), "a.png"), (png((2, 2, 2)), "b.png")])
+    eid = a.one("SELECT id FROM journal_entry WHERE kind = 'note'")
+    first, second = entry_image_ids(a, eid)
+    page = a.client.get(f"/entries/{eid}/edit").get_data(as_text=True)
+    assert f'data-remove="{first}"' in page and 'type="checkbox"' not in page   # an × button, not a tick box
+    # "new:n" is the n-th uploaded file; it can go anywhere among the saved images
+    a.client.post(f"/entries/{eid}/edit",
+                  data={"body": "x", "image_order": ["new:1", str(second), "new:0", str(first)],
+                        "images": [(png((3, 3, 3)), "c.png"), (png((4, 4, 4)), "d.png")]},
+                  content_type="multipart/form-data")
+    ids = entry_image_ids(a, eid)
+    c_id = a.one("SELECT id FROM image WHERE id NOT IN (?, ?) ORDER BY id LIMIT 1", (first, second))
+    d_id = a.one("SELECT max(id) FROM image")
+    assert ids == [d_id, second, c_id, first]
+    assert a.one("SELECT group_concat(position) FROM (SELECT position FROM journal_entry_image "
+                 "WHERE entry_id = ? ORDER BY position)", (eid,)) == "0,1,2,3"
+    # removing a saved image while adding one in its place; nonsense order values are ignored
+    a.client.post(f"/entries/{eid}/edit",
+                  data={"body": "x", "image_order": [str(d_id), "new:0", "new:9", "junk", str(c_id), str(first)],
+                        "remove_image": str(second), "images": [(png((5, 5, 5)), "e.png")]},
+                  content_type="multipart/form-data")
+    e_id = a.one("SELECT max(id) FROM image")
+    assert entry_image_ids(a, eid) == [d_id, e_id, c_id, first]
+    # uploading a file the entry already has keeps one copy, in its first place
+    a.client.post(f"/entries/{eid}/edit",
+                  data={"body": "x", "image_order": ["new:0", str(d_id), str(e_id), str(c_id), str(first)],
+                        "images": [(png((1, 1, 1)), "a-again.png")]},
+                  content_type="multipart/form-data")
+    assert entry_image_ids(a, eid) == [first, d_id, e_id, c_id]
+
 def test_edit_entry_page_layout():
     a = App()
     wid = a.add_work(length_total="55")
@@ -531,6 +564,75 @@ def test_edit_entry_page_layout():
     a.post_entry(other, body="y", progress="3")
     eid = a.one("SELECT id FROM journal_entry WHERE kind = 'note' AND work_id = ?", (other,))
     assert "of ? chapters" in a.client.get(f"/entries/{eid}/edit").get_data(as_text=True)
+
+def image_paths_on_page(a, wid, eid):
+    """The entry's image files in the order its work page shows them."""
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    entry = page.split(f'id="entry-{eid}"')[1].split("</li>")[0]
+    return re.findall(r'<img src="/media/([^"]+)"', entry)
+
+def image_path(a, image_id):
+    return a.one("SELECT file_path FROM image WHERE id = ?", (image_id,))
+
+def test_entry_images_shown_in_saved_order():
+    a = App()
+    wid = a.add_work()
+    a.post_entry(wid, body="x", images=[(png((1, 1, 1)), "a.png"), (png((2, 2, 2)), "b.png"), (png((3, 3, 3)), "c.png")])
+    eid = a.one("SELECT id FROM journal_entry WHERE kind = 'note'")
+    ids = entry_image_ids(a, eid)
+    assert ids == sorted(ids)   # posted in the order they were attached
+    assert image_paths_on_page(a, wid, eid) == [image_path(a, i) for i in ids]
+    a.client.post(f"/entries/{eid}/edit", data={"body": "x", "image_order": [str(i) for i in reversed(ids)]},
+                  content_type="multipart/form-data")
+    assert image_paths_on_page(a, wid, eid) == [image_path(a, i) for i in reversed(ids)]
+
+def test_edit_entry_bad_image_saves_nothing():
+    a = App()
+    wid = a.add_work()
+    a.post_entry(wid, body="before", images=[(png((1, 1, 1)), "a.png"), (png((2, 2, 2)), "b.png")])
+    eid = a.one("SELECT id FROM journal_entry WHERE kind = 'note'")
+    first, second = entry_image_ids(a, eid)
+    r = a.client.post(f"/entries/{eid}/edit",
+                      data={"body": "after", "remove_image": str(first), "image_order": ["new:0", str(second)],
+                            "images": [(io.BytesIO(b"junk"), "bad.png")]}, content_type="multipart/form-data")
+    assert r.status_code == 400 and "Nothing was saved" in r.get_data(as_text=True)
+    assert a.one("SELECT body_md FROM journal_entry WHERE id = ?", (eid,)) == "before"
+    assert entry_image_ids(a, eid) == [first, second]
+    assert a.one("SELECT COUNT(*) FROM image") == 2
+
+def test_edit_status_entry_changes_only_its_comment():
+    a = App()
+    wid = a.add_work(status="reading")
+    a.client.post(f"/works/{wid}/status", data={"status": "paused"})
+    eid = a.one("SELECT id FROM journal_entry WHERE status_to = 'paused'")
+    page = a.client.get(f"/entries/{eid}/edit").get_data(as_text=True)
+    assert "<span>Comment</span>" in page and "data-image-input" not in page and 'name="progress"' not in page
+    # progress and images sent anyway are ignored
+    r = a.client.post(f"/entries/{eid}/edit", data={"body": "Busy month", "progress": "9",
+                                                    "images": [(png(), "a.png")]}, content_type="multipart/form-data")
+    assert r.status_code == 302
+    assert a.one("SELECT body_md FROM journal_entry WHERE id = ?", (eid,)) == "Busy month"
+    assert a.one("SELECT progress_value FROM journal_entry WHERE id = ?", (eid,)) is None
+    assert a.one("SELECT COUNT(*) FROM image") == 0
+    assert a.one("SELECT status_code FROM work_current_status WHERE work_id = ?", (wid,)) == "paused"
+    # a status entry can be left with no comment
+    a.client.post(f"/entries/{eid}/edit", data={"body": ""}, content_type="multipart/form-data")
+    assert a.one("SELECT body_md FROM journal_entry WHERE id = ?", (eid,)) is None
+    assert a.one("SELECT COUNT(*) FROM status_event WHERE work_id = ?", (wid,)) == 2
+
+def test_journal_in_date_order():
+    a = App()
+    wid = a.add_work()
+    a.post_entry(wid, body="written today")
+    a.post_entry(wid, body="written long ago", posted_at="2024-03-05T08:00:00Z")
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    assert page.index("written long ago") < page.index("written today")
+    # changing an entry's date moves it
+    eid = a.one("SELECT id FROM journal_entry WHERE body_md = 'written long ago'")
+    a.client.post(f"/entries/{eid}/edit", data={"body": "written long ago", "posted_at": "2099-01-01T00:00:00Z"},
+                  content_type="multipart/form-data")
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    assert page.index("written today") < page.index("written long ago")
 
 def test_format_reference_matches_rendering():
     a = App()
@@ -676,8 +778,23 @@ def test_rating_and_review():
 def test_notes():
     a = App()
     wid = a.add_work()
-    a.client.post(f"/works/{wid}/notes", data={"notes_md": "Up to the festival arc"})
-    assert "Up to the festival arc" in a.client.get(f"/works/{wid}").get_data(as_text=True)
+    notes = lambda: a.client.get(f"/works/{wid}").get_data(as_text=True).split('id="notes"')[1].split("</details>")[0]
+    view, form = notes().split("data-form")
+    assert "No notes yet." in view and ">Add notes</button>" in view
+    assert "hidden>" in form.split("<textarea")[0]   # the form waits behind the Add button
+    a.client.post(f"/works/{wid}/notes", data={"notes_md": "Up to the *festival* arc"})
+    view, form = notes().split("data-form")
+    assert '<div class="prose"><p>Up to the <em>festival</em> arc</p>' in view and ">Edit</button>" in view
+    assert ">Up to the *festival* arc</textarea>" in form   # the form holds the Markdown to edit
+    a.client.post(f"/works/{wid}/notes", data={"notes_md": "  "})   # emptying clears them
+    assert a.one("SELECT notes_md FROM work WHERE id = ?", (wid,)) is None
+
+def test_edit_details_button_beside_title():
+    a = App()
+    wid = a.add_work(title="Lantern", pub_start_year="2017")
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    row = re.search(r'<div class="title-row">(.*?)</div>', page, re.S).group(1)
+    assert row.index("<h1>Lantern") < row.index(f'href="/works/{wid}/edit">Edit Details</a>')
 
 def test_library_filter():
     a = App()
@@ -686,6 +803,37 @@ def test_library_filter():
     a.client.get("/")                       # clears the "Added …" messages
     page = a.client.get("/?status=paused").get_data(as_text=True)
     assert "Paused one" in page and "Reading one" not in page
+    page = a.client.get("/").get_data(as_text=True)
+    assert 'All <span class="count">2</span>' in page and 'Paused <span class="count">1</span>' in page
+    assert "Paused one" in a.client.get("/?status=nonsense").get_data(as_text=True)   # unknown filter shows all
+
+def test_library_most_recent_first():
+    a = App()
+    older = a.add_work(title="Older")
+    a.add_work(title="Newer")
+    a.client.get("/")                       # clears the "Added …" messages
+    page = a.client.get("/").get_data(as_text=True)
+    assert page.index("Newer") < page.index("Older")
+    a.post_entry(older, body="back to this one", posted_at="2099-01-01T00:00:00Z")   # a journal entry counts as activity
+    page = a.client.get("/").get_data(as_text=True)
+    assert page.index("Older") < page.index("Newer")
+
+def test_missing_pages_and_bad_requests():
+    a = App()
+    wid = a.add_work()
+    assert a.client.get("/entries/999/edit").status_code == 404
+    assert a.client.post("/entries/999/delete").status_code == 404
+    assert a.client.post("/works/999/status", data={"status": "paused"}).status_code == 404
+    assert a.client.post(f"/works/{wid}/status", data={"status": "nonsense"}).status_code == 400
+    assert a.one("SELECT COUNT(*) FROM status_event WHERE work_id = ?", (wid,)) == 1
+
+def test_upload_too_large():
+    a = App()
+    wid = a.add_work()
+    a.app.config["MAX_CONTENT_LENGTH"] = 10_000   # stand-in for the real 200 MB limit
+    r = a.post_entry(wid, expect=413, body="x", images=[(io.BytesIO(b"0" * 20_000), "big.png")])
+    assert "Upload too large" in r.get_data(as_text=True)
+    assert a.one("SELECT COUNT(*) FROM journal_entry WHERE kind = 'note'") == 0
 
 def test_empty_library_message():
     a = App()
@@ -711,11 +859,28 @@ def test_footer_version_links_and_credit():
     a = App()
     assert re.fullmatch(r"\d+\.\d+\.\d+", VERSION)
     footer = re.search(r'<footer class="site">(.*?)</footer>', a.client.get("/").get_data(as_text=True), re.S).group(1)
-    assert f'Reading Journal {VERSION} • <a href="/changelog">Changelog</a>' in footer
-    for href in ('href="/"', 'href="/works/new"',
-                 'href="https://creativecommons.org/licenses/by/4.0/"'):
+    assert f'Reading Journal {VERSION} • <a href="/changelog">Changelog</a> • <a href="/credits">Credits</a>' in footer
+    for href in ('href="/"', 'href="/works/new"'):
         assert href in footer, href
-    assert "Notebook logo by EmojiOne, recolored, licensed under" in footer   # CC BY: credit, changes, licence link
+
+def test_credits_page():
+    a = App()
+    r = a.client.get("/credits")
+    page = r.get_data(as_text=True)
+    r.close()
+    assert r.status_code == 200 and "<h1>Credits</h1>" in page
+    # CC BY: creator, that it was changed, and a link to the licence
+    assert "The notebook icon by EmojiOne, recolored, licensed under" in page
+    assert 'href="https://creativecommons.org/licenses/by/4.0/"' in page
+    # the font and SortableJS licences ship with the app and are linked
+    for path in ("/static/fonts/OFL-zen-maru-gothic.txt", "/static/MIT-sortablejs.txt"):
+        assert f'href="{path}"' in page, path
+        f = a.client.get(path)
+        assert f.status_code == 200, path
+        f.close()
+    s = a.client.get("/static/Sortable.min.js")
+    assert s.status_code == 200 and b"Sortable 1.15.6 - MIT" in s.data
+    s.close()
 
 def test_changelog_page():
     a = App()

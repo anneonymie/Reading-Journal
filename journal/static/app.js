@@ -1,4 +1,4 @@
-// Small enhancements. Every page also works without JavaScript.
+// Page behaviour: dates, confirmations, repeating rows and the image controls.
 (function () {
   "use strict";
 
@@ -88,97 +88,94 @@
     set.appendChild(button);
   });
 
-  // Left and right buttons for putting images in order.
-  const moveButtons = (index, count, move) => {
-    const box = document.createElement("span");
-    box.className = "move";
-    [[-1, "←", "Move earlier"], [1, "→", "Move later"]].forEach(([step, text, label]) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "secondary";
-      b.textContent = text;
-      b.setAttribute("aria-label", label);
-      b.disabled = index + step < 0 || index + step >= count;
-      b.addEventListener("click", () => move(step));
-      box.appendChild(b);
+  // Text shown as-is until Edit swaps in its form. Cancel restores the saved text and shows it again.
+  document.querySelectorAll("[data-inline-edit]").forEach((box) => {
+    const view = box.querySelector("[data-view]");
+    const form = box.querySelector("[data-form]");
+    const textarea = form.querySelector("textarea");
+    box.querySelector("[data-edit]").addEventListener("click", () => {
+      view.hidden = true;
+      form.hidden = false;
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
     });
-    return box;
-  };
-
-  // Images already saved on an entry. Each carries a hidden field, so the saved order follows the page.
-  document.querySelectorAll("[data-reorder]").forEach((list) => {
-    const draw = () => {
-      const items = Array.from(list.querySelectorAll("[data-reorder-item]"));
-      items.forEach((item, index) => {
-        item.querySelector(".move")?.remove();
-        item.appendChild(moveButtons(index, items.length, (step) => {
-          const other = items[index + step];
-          if (step < 0) other.before(item); else other.after(item);
-          draw();
-          item.querySelector(`.move button:nth-child(${step < 0 ? 1 : 2})`)?.focus();
-        }));
-      });
-    };
-    draw();
+    box.querySelector("[data-cancel]").addEventListener("click", () => {
+      form.reset();
+      form.hidden = true;
+      view.hidden = false;
+    });
   });
 
-  // Images: paste, drop or pick; preview them and allow removal before posting.
+  // Images: pick, paste or drop them in; drag to reorder; × takes one off.
+  // Every tile carries a hidden image_order field: a saved image's id, or "new:<n>" for the n-th
+  // uploaded file. The file box is rebuilt from the new tiles in page order after every change.
   document.querySelectorAll("input[data-image-input]").forEach((input) => {
     const form = input.form;
-    const previews = form.querySelector("[data-previews]");
+    const grid = form.querySelector("[data-image-grid]");
     const textarea = form.querySelector("textarea[data-paste-images]");
-    let files = [];
-    let canSet = true;
-    try { new DataTransfer(); } catch (_) { canSet = false; }
+    const fileOf = new Map();   // tile -> File, for images not saved yet
 
     const sync = () => {
-      if (canSet) {
-        const dt = new DataTransfer();
-        files.forEach((f) => dt.items.add(f));
-        input.files = dt.files;
-      }
-      previews.querySelectorAll("img").forEach((img) => URL.revokeObjectURL(img.src));
-      previews.innerHTML = "";
-      previews.hidden = files.length === 0;
-      files.forEach((file, index) => {
-        const box = document.createElement("div");
-        box.className = "preview";
+      const tiles = Array.from(grid.children);
+      const dt = new DataTransfer();
+      tiles.forEach((tile) => {
+        const file = fileOf.get(tile);
+        if (file) {
+          tile.querySelector("input").value = `new:${dt.items.length}`;
+          dt.items.add(file);
+        }
+      });
+      input.files = dt.files;
+      grid.hidden = tiles.length === 0;
+    };
+
+    const add = (list) => {
+      const images = Array.from(list).filter((f) => f.type.startsWith("image/"));
+      images.forEach((file) => {
+        const tile = document.createElement("div");
+        tile.className = "image-tile";
+        const order = document.createElement("input");
+        order.type = "hidden";
+        order.name = "image_order";
         const img = document.createElement("img");
         img.src = URL.createObjectURL(file);
         img.alt = file.name || "Image";
-        box.appendChild(img);
-        if (canSet) {
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.textContent = "×";
-          remove.setAttribute("aria-label", `Remove ${file.name || "image"}`);
-          remove.addEventListener("click", () => { files.splice(index, 1); sync(); });
-          box.appendChild(remove);
-          if (files.length > 1) {
-            box.appendChild(moveButtons(index, files.length, (step) => {
-              [files[index], files[index + step]] = [files[index + step], files[index]];
-              sync();
-            }));
-          }
-        }
-        previews.appendChild(box);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "tile-remove";
+        remove.textContent = "×";
+        remove.setAttribute("aria-label", `Remove ${file.name || "image"}`);
+        tile.append(order, img, remove);
+        grid.appendChild(tile);
+        fileOf.set(tile, file);
       });
-    };
-    const add = (list) => {
-      const images = Array.from(list).filter((f) => f.type.startsWith("image/"));
-      if (!images.length) return false;
-      files = canSet ? files.concat(images) : images;
       sync();
-      return true;
+      return images.length > 0;
     };
 
-    input.addEventListener("change", () => {
-      // The picker replaces input.files, so re-add what was already chosen.
-      const picked = Array.from(input.files);
-      if (canSet) { files = files.concat(picked); sync(); } else { files = picked; sync(); }
+    // × takes the tile off the page. A saved image is only dropped from the entry when the form is saved.
+    grid.addEventListener("click", (e) => {
+      const button = e.target.closest(".tile-remove");
+      if (!button) return;
+      const tile = button.closest(".image-tile");
+      if (fileOf.has(tile)) {
+        URL.revokeObjectURL(tile.querySelector("img").src);
+        fileOf.delete(tile);
+      } else {
+        const gone = document.createElement("input");
+        gone.type = "hidden";
+        gone.name = "remove_image";
+        gone.value = button.dataset.remove;
+        form.appendChild(gone);
+      }
+      tile.remove();
+      sync();
     });
 
-    if (textarea && canSet) {
+    // The picker replaces the file box's contents (or empties it on Cancel); add its files, then rebuild.
+    input.addEventListener("change", () => add(input.files));
+
+    if (textarea) {
       textarea.addEventListener("paste", (e) => {
         const cd = e.clipboardData;
         if (!cd || !cd.files || !cd.files.length) return;
@@ -186,11 +183,20 @@
         if (add(cd.files) && !hasText) e.preventDefault();
       });
     }
-    if (canSet) {
-      form.addEventListener("dragover", (e) => { e.preventDefault(); });
-      form.addEventListener("drop", (e) => {
-        if (e.dataTransfer && add(e.dataTransfer.files)) e.preventDefault();
+    form.addEventListener("dragover", (e) => { e.preventDefault(); });
+    form.addEventListener("drop", (e) => {
+      if (e.dataTransfer && e.dataTransfer.files.length && add(e.dataTransfer.files)) e.preventDefault();
+    });
+
+    if (window.Sortable) {
+      Sortable.create(grid, {
+        animation: 150,
+        delay: 150, delayOnTouchOnly: true,   // on a phone, press and hold to drag; a quick swipe still scrolls
+        filter: "button",
+        preventOnFilter: false,
+        onEnd: () => sync(),
       });
     }
+    sync();
   });
 })();

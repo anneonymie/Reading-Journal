@@ -3,6 +3,14 @@ Updates to the Reading Journal app. The current app version appears at the botto
 
 ## Unreleased
 
+- Images in entries are put in order by dragging them. The arrow buttons are gone.
+- Edit Journal Entry: new images appear alongside the saved ones and can be placed anywhere among them before saving.
+- Edit Journal Entry: a red × removes an image straight away instead of a Remove tick box. Nothing is deleted until you save, so Cancel brings it back.
+- Work pages: notes show as formatted text, with an Edit button to change them, like journal entries.
+- Work pages: Edit Details is now a button to the right of the title.
+- Work pages: the cover is larger in a wide browser window.
+- New Credits page, linked from the footer, lists the logo, font and other borrowed work with their licences.
+
 ## 0.3.0 (2026-10-25)
 
 - New `dev.bat` for working on the app: it opens the sample journal and restarts by itself when the code changes, so there's no need to restart it by hand.

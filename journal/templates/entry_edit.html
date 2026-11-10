@@ -23,26 +23,22 @@
   {% if entry.kind == 'note' %}
     <fieldset>
       <legend>Images</legend>
-      {% if images %}
-      {# Each image carries a hidden image_order field; moving an image moves its field, so the saved order follows. #}
-      <div class="edit-shots" data-reorder>
+      {# Each image carries a hidden image_order field; moving an image moves its field, so the saved order follows.
+         The × button takes the image off the page; it's removed from the entry when the entry is saved. #}
+      <div class="image-grid" data-image-grid {% if not images %}hidden{% endif %}>
         {% for i in images %}
-          <div class="edit-shot" data-reorder-item>
+          <div class="image-tile">
             <input type="hidden" name="image_order" value="{{ i.id }}">
-            <label>
-              <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="Image {{ loop.index }}" loading="lazy">
-              <span><input type="checkbox" name="remove_image" value="{{ i.id }}"> Remove</span>
-            </label>
+            <img src="{{ url_for('journal.media', rel=i.file_path) }}" alt="Image {{ loop.index }}" loading="lazy">
+            <button type="button" class="tile-remove" data-remove="{{ i.id }}" aria-label="Remove image {{ loop.index }}">×</button>
           </div>
         {% endfor %}
       </div>
-      {% endif %}
-      <div class="previews" data-previews hidden></div>
       <label class="attach">
         <input type="file" name="images" accept="image/*" multiple data-image-input>
         <span>+ Add images</span>
       </label>
-      {% if images %}<p class="hint">New images go after the ones already here.</p>{% endif %}
+      <p class="hint">Drag images to change their order. Removed images stay in the entry until you save.</p>
     </fieldset>
 
     {% set unit = entry.entry_unit_plural or entry.series_unit_plural %}

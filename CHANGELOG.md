@@ -3,6 +3,8 @@ Updates to the Reading Journal app. The current app version appears at the botto
 
 ## Unreleased
 
+## 0.4.0 (2026-11-10)
+
 - Images in entries are put in order by dragging them. The arrow buttons are gone.
 - Edit Journal Entry: new images appear alongside the saved ones and can be placed anywhere among them before saving.
 - Edit Journal Entry: a red × removes an image straight away instead of a Remove tick box. Nothing is deleted until you save, so Cancel brings it back.

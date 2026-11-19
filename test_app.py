@@ -96,7 +96,8 @@ def cleanup(strict=True):
 def test_pages_load():
     a = App()
     wid = a.add_work()
-    for url in ("/", "/works/new", f"/works/{wid}", f"/works/{wid}/edit", f"/works/{wid}/delete", "/?status=reading"):
+    for url in ("/", "/works/new", f"/works/{wid}", f"/works/{wid}/edit", f"/works/{wid}/delete", "/?status=reading",
+                "/tags", "/tags/1"):
         assert a.client.get(url).status_code == 200, url
     assert a.client.get("/works/999").status_code == 404
 
@@ -291,7 +292,7 @@ def test_duplicate_source_id_rejected_with_link():
     assert r.status_code == 400 and f"/works/{first}" in body and "already used by" in body
     assert a.one("SELECT COUNT(*) FROM work") == 1
 
-def test_source_links_recognised_by_site():
+def test_source_links_recognized_by_site():
     a = App()
     wid = a.add_work(source_link=["https://archiveofourown.org/works/42/chapters/7", "",
                                   "https://www.mangaupdates.com/series/pm5ww2j/lantern"])
@@ -662,6 +663,216 @@ def test_mismatched_unit_shows_question_mark():
     assert 'class="why"' in page and "counts in volumes" in page
     assert a.one("SELECT progress_current FROM work WHERE id = ?", (wid,)) == 5
 
+# ---------------------------------------------------------------- tags
+
+def tag_id(a, name):
+    return a.one("SELECT id FROM tag WHERE name = ?", (name,))
+
+def work_tag_names(a, wid):
+    conn = a.db()
+    try:
+        return sorted(r[0] for r in conn.execute(
+            "SELECT t.name FROM work_tag wt JOIN tag t ON t.id = wt.tag_id WHERE wt.work_id = ?", (wid,)))
+    finally:
+        conn.close()
+
+def test_add_tags_to_work():
+    a = App()
+    wid = a.add_work()
+    r = a.client.post(f"/works/{wid}/tags", data={"name": "  horror "})
+    assert r.status_code == 302 and r.headers["Location"].endswith(f"/works/{wid}#tags")
+    a.client.post(f"/works/{wid}/tags", data={"name": "yaoi"})                 # an alias finds its tag
+    a.client.post(f"/works/{wid}/tags", data={"name": "Tiny   Dragons"})       # a new name makes a new tag
+    a.client.post(f"/works/{wid}/tags", data={"name": "HORROR"})               # already there: no repeat
+    a.client.post(f"/works/{wid}/tags", data={"name": "   "})                  # blank: nothing
+    assert work_tag_names(a, wid) == ["Boys' Love", "Horror", "Tiny Dragons"]
+    assert a.one("SELECT category_id FROM tag WHERE name = 'Tiny Dragons'") is None   # new tags start uncategorized
+    assert a.one("SELECT COUNT(*) FROM tag WHERE name IN ('yaoi', 'horror')") == 1     # only Horror itself
+
+def test_tag_box_comes_back_on_its_own_for_the_script():
+    a = App()
+    wid = a.add_work()
+    r = a.client.post(f"/works/{wid}/tags", data={"name": "Fluff"}, headers={"X-Partial": "1"})
+    box = r.get_data(as_text=True)
+    assert r.status_code == 200
+    assert '<section class="panel tags-panel" id="tags"' in box and "<html" not in box and ">Fluff" in box
+
+def test_work_page_lists_cws_apart_from_other_tags():
+    a = App()
+    wid = a.add_work()
+    for name in ("Horror", "Fluff", "Uncharted"):
+        a.client.post(f"/works/{wid}/tags", data={"name": name})
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    box = page.split('id="tags"')[1].split("</section>")[0]
+    cws, cloud = box.split('class="tag-cloud"')
+    assert "Content warnings" in cws and ">Horror" in cws and "Fluff" not in cws
+    assert ">Fluff" in cloud and ">Uncharted" in cloud and "Horror" not in cloud
+    assert cloud.index(">Fluff") < cloud.index(">Uncharted")   # grouped by category, uncategorized last
+    assert f'style="--cat: {a.one("SELECT color FROM tag_category WHERE name = ?", ("Mood",))}"' in cloud
+
+def test_tag_popup_sets_category_cw_and_reason():
+    a = App()
+    wid = a.add_work()
+    other = a.add_work(title="Other")
+    a.client.post(f"/works/{wid}/tags", data={"name": "Tiny Dragons"})
+    a.client.post(f"/works/{other}/tags", data={"name": "Tiny Dragons"})
+    tid = tag_id(a, "Tiny Dragons")
+    page = a.client.get(f"/works/{wid}").get_data(as_text=True)
+    assert f'action="/works/{wid}/tags/{tid}"' in page and '<option value="">Uncategorized</option>' in page
+    plot = a.one("SELECT id FROM tag_category WHERE name = 'Plot'")
+    a.client.post(f"/works/{wid}/tags/{tid}", data={"category": str(plot), "cw": "1", "reason": "Ch. 3, the egg"})
+    assert a.one("SELECT category_id FROM tag WHERE id = ?", (tid,)) == plot
+    assert a.one("SELECT COUNT(*) FROM cw_setting WHERE tag_id = ?", (tid,)) == 1
+    assert a.one("SELECT justification_md FROM work_tag WHERE work_id = ? AND tag_id = ?", (wid, tid)) == "Ch. 3, the egg"
+    assert a.one("SELECT justification_md FROM work_tag WHERE work_id = ? AND tag_id = ?", (other, tid)) is None   # reason is per work
+    # unticking CW and choosing Uncategorized; an unknown category counts as Uncategorized
+    a.client.post(f"/works/{wid}/tags/{tid}", data={"category": "999", "reason": ""})
+    assert a.one("SELECT category_id FROM tag WHERE id = ?", (tid,)) is None
+    assert a.one("SELECT COUNT(*) FROM cw_setting WHERE tag_id = ?", (tid,)) == 0
+    assert a.one("SELECT justification_md FROM work_tag WHERE work_id = ? AND tag_id = ?", (wid, tid)) is None
+
+def test_remove_tag_from_work():
+    a = App()
+    wid = a.add_work()
+    a.client.post(f"/works/{wid}/tags", data={"name": "Fluff"})
+    a.client.post(f"/works/{wid}/tags/{tag_id(a, 'Fluff')}/remove")
+    assert work_tag_names(a, wid) == [] and tag_id(a, "Fluff")   # off the work, but the tag stays
+
+def suggestions(a, q, work=None):
+    r = a.client.get("/tags/suggest", query_string={"q": q, **({"work": work} if work else {})})
+    return r.get_json()
+
+def test_tag_suggestions():
+    a = App()
+    names = lambda q, **kw: [s["name"] for s in suggestions(a, q, **kw)]
+    assert names("romance")[0] == "Romance"                     # exact match first
+    assert names("rom")[:2] == ["Romance", "Romantasy"]         # then names starting with it, shortest first
+    assert "Dark Romance" in names("rom")                       # then words starting with it
+    yaoi = suggestions(a, "yaoi")[0]
+    assert yaoi["name"] == "Boys' Love" and yaoi["alias"] == "Yaoi"   # aliases find their tag, and say how
+    assert names("hororr")[0] == "Horror"                        # a typo still finds it
+    assert suggestions(a, "   ") == [] and len(suggestions(a, "a")) <= 8
+    # tags already on the work aren't suggested again
+    wid = a.add_work()
+    a.client.post(f"/works/{wid}/tags", data={"name": "Romance"})
+    assert "Romance" not in names("rom", work=wid)
+    # typing its exact name or alias says it's already there, instead of offering to create it
+    a.client.post(f"/works/{wid}/tags", data={"name": "Cozy"})
+    first = suggestions(a, "iyashikei", work=wid)[0]
+    assert first["name"] == "Cozy" and first["on_work"] is True
+    # once works share tags, tags often used with the best match follow it
+    for title in ("One", "Two"):
+        w = a.add_work(title=title)
+        for name in ("Slow Burn", "Mutual Pining"):
+            a.client.post(f"/works/{w}/tags", data={"name": name})
+    found = suggestions(a, "slow burn")
+    assert found[0]["name"] == "Slow Burn"
+    assert {"name": "Mutual Pining", "similar_to": "Slow Burn"}.items() <= next(
+        s for s in found if s["name"] == "Mutual Pining").items()
+
+def test_tags_page():
+    a = App()
+    page = a.client.get("/tags").get_data(as_text=True)
+    assert "<h1>Tags</h1>" in page
+    heads = re.findall(r'<h2><span class="swatch" aria-hidden="true"></span>([^<]+?) <span', page)
+    assert heads == ["Genre", "Audience", "Relationships", "Mood", "Themes", "Plot", "Characters", "Setting", "Form"]
+    assert "<p>What happens: the premise and the hooks.</p>" in page   # each category's description
+    assert 'id="uncategorized"' not in page   # no Uncategorized section until a tag needs one
+    wid = a.add_work()
+    a.client.post(f"/works/{wid}/tags", data={"name": "Tiny Dragons"})
+    a.client.post(f"/works/{wid}/tags", data={"name": "Fluff"})
+    page = a.client.get("/tags").get_data(as_text=True)
+    loose = page.split('id="uncategorized"')[1].split("</section>")[0]
+    assert ">Tiny Dragons</a>" in loose
+    mood = page.split(f'id="category-{a.one("SELECT id FROM tag_category WHERE name = ?", ("Mood",))}"')[1].split("</section>")[0]
+    assert re.search(r'>Fluff</a> <span class="uses">1</span>', mood)   # how many works use it
+
+def test_edit_add_delete_and_reorder_categories():
+    a = App()
+    mood = a.one("SELECT id FROM tag_category WHERE name = 'Mood'")
+    a.client.post(f"/categories/{mood}", data={"name": "Vibes", "color": "#AA00ff", "description_md": "How it *feels*."})
+    assert a.one("SELECT name || ' ' || color FROM tag_category WHERE id = ?", (mood,)) == "Vibes #aa00ff"
+    assert "<p>How it <em>feels</em>.</p>" in a.client.get("/tags").get_data(as_text=True)
+    # a name already in use, whatever the capitals, changes nothing
+    r = a.client.post(f"/categories/{mood}", data={"name": "genre", "color": "#000000"}, follow_redirects=True)
+    assert "already a category called" in r.get_data(as_text=True)
+    assert a.one("SELECT name || ' ' || color FROM tag_category WHERE id = ?", (mood,)) == "Vibes #aa00ff"
+    # adding one puts it last; a color that isn't #rrggbb becomes gray
+    a.client.post("/categories", data={"name": "Pairings", "color": "pink"})
+    assert a.one("SELECT color FROM tag_category WHERE name = 'Pairings'") == "#808080"
+    assert a.one("SELECT name FROM tag_category ORDER BY position DESC LIMIT 1") == "Pairings"
+    assert "A category needs a name" in a.client.post("/categories", data={"name": " "}, follow_redirects=True).get_data(as_text=True)
+    # deleting one leaves its tags, uncategorized
+    fluff = tag_id(a, "Fluff")
+    a.client.post(f"/categories/{mood}/delete")
+    assert a.one("SELECT category_id FROM tag WHERE id = ?", (fluff,)) is None
+    # dragging into a new order; anything left out keeps its place after
+    pairings, form = (a.one("SELECT id FROM tag_category WHERE name = ?", (n,)) for n in ("Pairings", "Form"))
+    r = a.client.post("/categories/order", data={"order": [str(pairings), str(form), "999"]}, headers={"X-Partial": "1"})
+    assert r.status_code == 204
+    order = a.one("SELECT group_concat(name, ',') FROM (SELECT name FROM tag_category ORDER BY position)")
+    assert order.startswith("Pairings,Form,Genre,Audience,")
+
+def test_tag_page_edit_rename_and_delete():
+    a = App()
+    wid = a.add_work()
+    a.client.post(f"/works/{wid}/tags", data={"name": "Isekai"})
+    a.client.post(f"/works/{wid}/tags/{tag_id(a, 'Isekai')}", data={"category": "", "reason": "Truck-kun"})
+    tid = tag_id(a, "Isekai")
+    page = a.client.get(f"/tags/{tid}").get_data(as_text=True)
+    assert "<h1>Isekai</h1>" in page and "Transported to Another World" in page   # aliases
+    assert ">Otome Isekai</a>" in page                                            # the tags inside it
+    assert ">Test Manga</a>" in page and "<p>Truck-kun</p>" in page               # its works, with reasons
+    assert f'href="/?tag={tid}"' in page
+    plot = a.one("SELECT id FROM tag_category WHERE name = 'Plot'")
+    a.client.post(f"/tags/{tid}", data={"name": "Isekai!", "category": str(plot), "cw": "1", "description_md": "Off to *elsewhere*"})
+    assert a.one("SELECT name || '|' || category_id || '|' || description_md FROM tag WHERE id = ?", (tid,)) == f"Isekai!|{plot}|Off to *elsewhere*"
+    assert a.one("SELECT COUNT(*) FROM cw_setting WHERE tag_id = ?", (tid,)) == 1
+    # another tag's name or alias can't be taken
+    r = a.client.post(f"/tags/{tid}", data={"name": "yaoi", "category": str(plot)}, follow_redirects=True)
+    assert "already a tag or alias" in r.get_data(as_text=True) and a.one("SELECT name FROM tag WHERE id = ?", (tid,)) == "Isekai!"
+    # its own alias can: the two swap places
+    a.client.post(f"/tags/{tid}", data={"name": "Transported to Another World", "category": str(plot)})
+    assert a.one("SELECT name FROM tag WHERE id = ?", (tid,)) == "Transported to Another World"
+    assert a.one("SELECT COUNT(*) FROM tag_alias WHERE tag_id = ?", (tid,)) == 0
+    # deleting takes it off every work
+    a.client.post(f"/tags/{tid}/delete")
+    assert a.one("SELECT COUNT(*) FROM tag WHERE id = ?", (tid,)) == 0 and work_tag_names(a, wid) == []
+    assert a.client.get(f"/tags/{tid}").status_code == 404
+
+def test_find_or_create_tag_from_tags_page():
+    a = App()
+    r = a.client.post("/tags", data={"name": "shonen"})
+    assert r.headers["Location"].endswith(f"/tags/{tag_id(a, 'Shounen')}")
+    r = a.client.post("/tags", data={"name": "Weird Little Guys"})
+    assert r.headers["Location"].endswith(f"/tags/{tag_id(a, 'Weird Little Guys')}")
+
+def test_library_filter_by_tag():
+    a = App()
+    cozy = a.add_work(title="Cozy One", status="reading")
+    a.add_work(title="Other One", status="reading")
+    paused = a.add_work(title="Paused Cozy", status="paused")
+    for w in (cozy, paused):
+        a.client.post(f"/works/{w}/tags", data={"name": "Cozy"})
+    a.client.get("/")
+    tid = tag_id(a, "Cozy")
+    page = a.client.get(f"/?tag={tid}").get_data(as_text=True)
+    assert "Cozy One" in page and "Paused Cozy" in page and "Other One" not in page
+    assert 'All <span class="count">2</span>' in page and 'Reading <span class="count">1</span>' in page   # counts follow the tag
+    assert f'href="/?status=paused&amp;tag={tid}"' in page and '× Clear' in page
+    page = a.client.get(f"/?tag={tid}&status=paused").get_data(as_text=True)
+    assert "Paused Cozy" in page and "Cozy One" not in page
+    assert "Other One" in a.client.get("/?tag=999").get_data(as_text=True)   # an unknown tag shows everything
+    empty = tag_id(a, "Fluff")
+    assert "No works are tagged Fluff yet" in a.client.get(f"/?tag={empty}").get_data(as_text=True)
+
+def test_deleting_work_keeps_its_tags():
+    a = App()
+    wid = a.add_work()
+    a.client.post(f"/works/{wid}/tags", data={"name": "Tiny Dragons"})
+    a.client.post(f"/works/{wid}/delete")
+    assert a.one("SELECT COUNT(*) FROM work_tag") == 0 and tag_id(a, "Tiny Dragons")
+
 # ---------------------------------------------------------------- status, progress, review
 
 def test_status_change_logs_entry():
@@ -860,7 +1071,7 @@ def test_footer_version_links_and_credit():
     assert re.fullmatch(r"\d+\.\d+\.\d+", VERSION)
     footer = re.search(r'<footer class="site">(.*?)</footer>', a.client.get("/").get_data(as_text=True), re.S).group(1)
     assert f'Reading Journal {VERSION} • <a href="/changelog">Changelog</a> • <a href="/credits">Credits</a>' in footer
-    for href in ('href="/"', 'href="/works/new"'):
+    for href in ('href="/"', 'href="/tags"', 'href="/works/new"'):
         assert href in footer, href
 
 def test_credits_page():
@@ -869,10 +1080,10 @@ def test_credits_page():
     page = r.get_data(as_text=True)
     r.close()
     assert r.status_code == 200 and "<h1>Credits</h1>" in page
-    # CC BY: creator, that it was changed, and a link to the licence
+    # CC BY: creator, that it was changed, and a link to the license
     assert "The notebook icon by EmojiOne, recolored, licensed under" in page
     assert 'href="https://creativecommons.org/licenses/by/4.0/"' in page
-    # the font and SortableJS licences ship with the app and are linked
+    # the font and SortableJS licenses ship with the app and are linked
     for path in ("/static/fonts/OFL-zen-maru-gothic.txt", "/static/MIT-sortablejs.txt"):
         assert f'href="{path}"' in page, path
         f = a.client.get(path)
@@ -1044,6 +1255,60 @@ def test_upgrade_from_v3_journal_moves_publishers():
         conn.close()
         new_conn.close()
     assert "<dt>Publisher</dt><dd>Kodansha</dd>" in a.client.get("/works/2").get_data(as_text=True)
+
+def test_upgrade_from_v4_journal_adds_tag_categories():
+    def old_data(conn):
+        conn.execute("INSERT INTO work(id, title, format_code) VALUES (1, 'One', 'manga')")
+        conn.execute("INSERT INTO tag(id, name, category) VALUES (50, 'My Own Tag', 'trope'), (51, 'Space Opera', 'genre')")
+        conn.execute("INSERT INTO tag(id, name) VALUES (52, 'romance')")   # a starter tag's name, typed differently
+        conn.execute("INSERT INTO work_tag(work_id, tag_id, justification_md) VALUES (1, 50, 'why')")
+    a = App(old_schema="schema_v4.sql", before=old_data)
+    assert a.one("PRAGMA user_version") == V and len(backups(a)) == 1
+    # tags already there are kept, with their links; the old word 'genre' becomes the Genre category
+    assert a.one("SELECT category_id FROM tag WHERE id = 50") is None
+    assert a.one("SELECT c.name FROM tag t JOIN tag_category c ON c.id = t.category_id WHERE t.id = 51") == "Genre"
+    assert a.one("SELECT justification_md FROM work_tag WHERE tag_id = 50") == "why"
+    # an existing tag with a starter name isn't duplicated; it gets the starter category
+    assert a.one("SELECT COUNT(*) FROM tag WHERE name = 'Romance'") == 1
+    assert a.one("SELECT c.name FROM tag t JOIN tag_category c ON c.id = t.category_id WHERE t.id = 52") == "Genre"
+    # the starter list arrived, the same as in a brand-new journal
+    fresh = App()
+    for sql in ("SELECT COUNT(*) FROM tag_category", "SELECT COUNT(*) FROM tag_alias",
+                "SELECT COUNT(*) FROM cw_setting", "SELECT COUNT(*) FROM tag WHERE parent_id IS NOT NULL"):
+        assert a.one(sql) == fresh.one(sql), sql
+    assert a.one("SELECT COUNT(*) FROM tag") == fresh.one("SELECT COUNT(*) FROM tag") + 2   # plus the two of mine
+    # same tables, views, triggers and columns as a brand-new journal
+    objects = "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY 1, 2"
+    columns = "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?)"
+    conn, new_conn = a.db(), fresh.db()
+    try:
+        assert conn.execute(objects).fetchall() == new_conn.execute(objects).fetchall()
+        for table in ("tag", "tag_category"):
+            assert conn.execute(columns, (table,)).fetchall() == new_conn.execute(columns, (table,)).fetchall(), table
+    finally:
+        conn.close()
+        new_conn.close()
+
+def test_starter_tags_in_new_journal():
+    a = App()
+    cats = a.one("SELECT group_concat(name, ', ') FROM (SELECT name FROM tag_category ORDER BY position)")
+    assert cats == "Genre, Audience, Relationships, Mood, Themes, Plot, Characters, Setting, Form"
+    assert a.one("SELECT description_md FROM tag_category WHERE name = 'Plot'") == "What happens: the premise and the hooks."
+    tag = lambda name: a.one("""SELECT c.name || '|' || (t.id IN (SELECT tag_id FROM cw_setting))
+                                FROM tag t JOIN tag_category c ON c.id = t.category_id WHERE t.name = ?""", (name,))
+    assert tag("Horror") == "Genre|1" and tag("Found Family") == "Relationships|0" and tag("Violence") == "Themes|1"
+    assert a.one("SELECT t.name FROM tag_alias a JOIN tag t ON t.id = a.tag_id WHERE a.alias = 'yaoi'") == "Boys' Love"
+    assert a.one("SELECT p.name FROM tag t JOIN tag p ON p.id = t.parent_id WHERE t.name = 'Otome Isekai'") == "Isekai"
+    assert a.one("SELECT COUNT(*) FROM tag WHERE category_id IS NULL") == 0
+    # loading again changes nothing
+    conn = a.db()
+    try:
+        before = conn.execute("SELECT COUNT(*) FROM tag").fetchone()[0]
+        dbmod.load_starter_tags(conn)
+        assert conn.execute("SELECT COUNT(*) FROM tag").fetchone()[0] == before
+        conn.rollback()
+    finally:
+        conn.close()
 
 def test_up_to_date_database_not_backed_up():
     a = App()

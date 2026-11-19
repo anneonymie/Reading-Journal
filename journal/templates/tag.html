@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_macros.html" import tag_chip, cover %}
+{% block title %}{{ tag.name }} | Tags | Reading Journal{% endblock %}
+{% block content %}
+<div class="work">
+  <p class="crumb"><a href="{{ url_for('journal.tags_page') }}">Tags</a></p>
+  <div data-inline-edit>
+    <div data-view>
+      <div class="title-row">
+        <h1>{{ tag.name }}</h1>
+        <button type="button" class="button small secondary" data-edit>Edit Tag</button>
+      </div>
+      <p class="tag-meta">
+        <a class="chip" style="--cat: {{ tag.color }}" href="{{ url_for('journal.tags_page') }}#{{ 'category-%d'|format(tag.category_id) if tag.category_id else 'uncategorized' }}">{{ tag.category_name }}</a>
+        {% if tag.is_cw %}<span class="cw-badge">Content warning</span>{% endif %}
+      </p>
+      {% if tag.description_md %}<div class="prose">{{ tag.description_md|md }}</div>{% else %}<p class="hint">No description yet.</p>{% endif %}
+      <dl class="facts tag-facts">
+        {% if aliases %}<dt>Also called</dt><dd>{{ aliases|join(", ") }}</dd>{% endif %}
+        {% if parent %}<dt>Inside</dt><dd>{{ tag_chip(parent) }}</dd>{% endif %}
+        {% if children %}<dt>Contains</dt><dd><ul class="chips">{% for ch in children %}<li>{{ tag_chip(ch) }}</li>{% endfor %}</ul></dd>{% endif %}
+      </dl>
+    </div>
+    <form method="post" action="{{ url_for('journal.tag_update', tag_id=tag.id) }}" class="stack" data-form hidden>
+      <label class="field"><span>Name</span><input name="name" value="{{ tag.name }}" maxlength="100" required></label>
+      <div class="row">
+        <label class="field">
+          <span>Category</span>
+          <select name="category">
+            <option value="">Uncategorized</option>
+            {% for c in categories %}<option value="{{ c.id }}" {% if c.id == tag.category_id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <label class="check"><input type="checkbox" name="cw" value="1" {% if tag.is_cw %}checked{% endif %}> Content warning</label>
+      <label class="field">
+        <span>Description</span>
+        <textarea name="description_md" rows="4" data-ctrl-enter>{{ tag.description_md or "" }}</textarea>
+      </label>
+      <div class="actions">
+        <button type="submit" class="secondary">Save tag</button>
+        <button type="button" class="link" data-cancel>Cancel</button>
+        <button type="submit" class="link danger-text" formaction="{{ url_for('journal.tag_delete', tag_id=tag.id) }}"
+                data-confirm="Delete the tag {{ tag.name }}?{% if works %} It comes off {{ works|length }} {{ 'work' if works|length == 1 else 'works' }}.{% endif %}">Delete tag</button>
+      </div>
+    </form>
+  </div>
+
+  <section class="tag-works-section">
+    <div class="category-head">
+      <h2>Works <span class="count">{{ works|length }}</span></h2>
+      {% if works %}<a href="{{ url_for('journal.library', tag=tag.id) }}">Show in library</a>{% endif %}
+    </div>
+    {% if works %}
+    <ul class="tag-works">
+      {% for w in works %}
+      <li>
+        <a href="{{ url_for('journal.work_page', work_id=w.id) }}">{{ cover(w.cover_path, w.title, "cover small") }}</a>
+        <div>
+          <a class="tag-work-title" href="{{ url_for('journal.work_page', work_id=w.id) }}#tags">{{ w.title }}</a>
+          <span class="book-meta">{{ w.format_label }}</span>
+          {% if w.justification_md %}<div class="prose">{{ w.justification_md|md }}</div>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="hint">No works have this tag yet. Add it from a work's page.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

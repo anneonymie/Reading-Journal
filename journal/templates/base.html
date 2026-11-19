@@ -16,6 +16,7 @@
     </a>
     <nav>
       <a href="{{ url_for('journal.library') }}">Library</a>
+      <a href="{{ url_for('journal.tags_page') }}">Tags</a>
       <a class="button small" href="{{ url_for('journal.work_new') }}">Add Work</a>
     </nav>
   </header>
@@ -30,6 +31,7 @@
   <footer class="site">
     <nav aria-label="Footer">
       <a href="{{ url_for('journal.library') }}">Library</a>
+      <a href="{{ url_for('journal.tags_page') }}">Tags</a>
       <a href="{{ url_for('journal.work_new') }}">Add Work</a>
     </nav>
     <p>Reading Journal {{ app_version }} • <a href="{{ url_for('journal.changelog') }}">Changelog</a> • <a href="{{ url_for('journal.credits') }}">Credits</a></p>

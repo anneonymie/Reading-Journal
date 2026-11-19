@@ -311,6 +311,20 @@ def test_default_cws_present_and_searchable():
     assert names == {"Explicit sex", "Violence", "Sexual assault"}
     assert one(db, "SELECT COUNT(*) FROM tag_search WHERE tag_search MATCH 'violen'") == 1
 
+def test_tag_categories():
+    db = new_db()
+    db.execute("INSERT INTO tag_category(id, name, color) VALUES (1, 'Mood', '#7c4dbe')")
+    assert rejects(db, "INSERT INTO tag_category(name) VALUES ('mood')")          # names unique regardless of capitals
+    for bad in ("red", "#7C4DBE", "#7c4dbe0", "#7c4db", "#gggggg"):              # lowercase #rrggbb only
+        assert rejects(db, "INSERT INTO tag_category(name, color) VALUES ('X', ?)", (bad,)), bad
+    db.execute("INSERT INTO tag(id, name) VALUES (10, 'Fluff')")
+    assert one(db, "SELECT category_id FROM tag WHERE id = 10") is None             # new tags start uncategorized
+    db.execute("UPDATE tag SET category_id = 1 WHERE id = 10")
+    assert rejects(db, "UPDATE tag SET category_id = 99 WHERE id = 10")             # must be a real category
+    db.execute("DELETE FROM tag_category WHERE id = 1")
+    assert one(db, "SELECT category_id FROM tag WHERE id = 10") is None             # its tags become uncategorized
+    assert one(db, "SELECT name FROM tag WHERE id = 10") == "Fluff"
+
 def test_parent_cycles_blocked():
     db = new_db()
     db.execute("INSERT INTO tag(id, name) VALUES (101, 'A'), (102, 'B'), (103, 'C')")
@@ -391,7 +405,7 @@ def test_integrity():
     db = new_db()
     assert one(db, "PRAGMA integrity_check") == "ok"
     assert db.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert one(db, "PRAGMA user_version") == 4
+    assert one(db, "PRAGMA user_version") == 5
 
 
 if __name__ == "__main__":

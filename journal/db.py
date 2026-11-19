@@ -3,12 +3,14 @@
 Every connection goes through connect(), which switches on foreign keys.
 SQLite leaves them off by default, and without them deletes don't cascade.
 """
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
-SCHEMA_VERSION = 4
+STARTER_TAGS_PATH = Path(__file__).resolve().parent / "starter_tags.json"
+SCHEMA_VERSION = 5
 MIN_SQLITE = (3, 43, 0)
 
 
@@ -36,11 +38,70 @@ def _v3_to_v4(conn):
     conn.execute("ALTER TABLE work DROP COLUMN publisher")
 
 
+def _v4_to_v5(conn):
+    # Tags get editable categories instead of a fixed category word, and the starter tags arrive.
+    conn.execute("""CREATE TABLE tag_category (
+                        id             INTEGER PRIMARY KEY,
+                        name           TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                        color          TEXT NOT NULL DEFAULT '#808080'
+                                       CHECK (length(color) = 7 AND color GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+                        description_md TEXT,
+                        position       INTEGER NOT NULL DEFAULT 0
+                    ) STRICT""")
+    conn.execute("ALTER TABLE tag ADD COLUMN category_id INTEGER REFERENCES tag_category(id) ON DELETE SET NULL")
+    load_starter_tags(conn)
+    # The old fixed word 'genre' becomes the Genre category; the other old words had no meaning in the app.
+    conn.execute("""UPDATE tag SET category_id = (SELECT id FROM tag_category WHERE name = 'Genre')
+                    WHERE category = 'genre' AND category_id IS NULL""")
+    conn.execute("ALTER TABLE tag DROP COLUMN category")
+
+
+def load_starter_tags(conn):
+    """Add the starter categories and tags from starter_tags.json.
+
+    Anything that already exists by name is left as it is, except that an uncategorized
+    tag gets its starter category and a starter CW is marked. Aliases that would clash
+    with an existing name, and nesting that would loop, are skipped.
+    """
+    data = json.loads(STARTER_TAGS_PATH.read_text(encoding="utf-8"))
+    one = lambda sql, args: conn.execute(sql, args).fetchone()
+    position = one("SELECT coalesce(max(position) + 1, 0) FROM tag_category", ())[0]
+    for cat in data["categories"]:
+        if not one("SELECT 1 FROM tag_category WHERE name = ?", (cat["name"],)):
+            conn.execute("INSERT INTO tag_category(name, color, description_md, position) VALUES (?,?,?,?)",
+                         (cat["name"], cat["color"], cat["description"], position))
+            position += 1
+        cat_id = one("SELECT id FROM tag_category WHERE name = ?", (cat["name"],))[0]
+        for t in cat["tags"]:
+            if one("SELECT 1 FROM tag_alias WHERE alias = ?", (t["name"],)):
+                continue
+            conn.execute("INSERT OR IGNORE INTO tag(name, category_id) VALUES (?, ?)", (t["name"], cat_id))
+            tag_id = one("SELECT id FROM tag WHERE name = ?", (t["name"],))[0]
+            conn.execute("UPDATE tag SET category_id = ? WHERE id = ? AND category_id IS NULL", (cat_id, tag_id))
+            if t["cw"]:
+                conn.execute("INSERT OR IGNORE INTO cw_setting(tag_id) VALUES (?)", (tag_id,))
+    # Aliases and nesting refer to other tags, so they go in once every tag exists.
+    for cat in data["categories"]:
+        for t in cat["tags"]:
+            row = one("SELECT id FROM tag WHERE name = ?", (t["name"],))
+            if row is None:
+                continue
+            for alias in t["aliases"]:
+                if not (one("SELECT 1 FROM tag WHERE name = ?", (alias,))
+                        or one("SELECT 1 FROM tag_alias WHERE alias = ?", (alias,))):
+                    conn.execute("INSERT INTO tag_alias(alias, tag_id) VALUES (?, ?)", (alias, row[0]))
+            for child in t["children"]:
+                c = one("SELECT id, parent_id FROM tag WHERE name = ?", (child,))
+                if c and c["parent_id"] is None and not one(
+                        "SELECT 1 FROM tag_ancestor WHERE tag_id = ? AND ancestor_id = ?", (row[0], c["id"])):
+                    conn.execute("UPDATE tag SET parent_id = ? WHERE id = ?", (row[0], c["id"]))
+
+
 # Upgrade steps: MIGRATIONS[n](conn) takes a database from version n to n + 1.
 # All steps run in one transaction, so they must use conn.execute(), never
 # conn.executescript(), which commits part-way through.
 # old_schemas/ keeps each earlier schema.sql so tests can upgrade a real old database.
-MIGRATIONS = {2: _v2_to_v3, 3: _v3_to_v4}
+MIGRATIONS = {2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5}
 
 
 class SetupError(RuntimeError):
@@ -76,6 +137,7 @@ def init_db(db_path):
             if tables:
                 raise SetupError(f"{db_path} already contains data that isn't a reading journal.")
             conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            load_starter_tags(conn)
         elif version > SCHEMA_VERSION:
             raise SetupError(
                 f"{db_path} was last used by a newer version of the journal (database version {version}; "

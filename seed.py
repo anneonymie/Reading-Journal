@@ -38,26 +38,31 @@ def picture(w, h, a, b, label=None):
 WORKS = [
     dict(title="The Lantern Keeper's Apprentice", fmt="manga", unit="chapter", total=None,
          authors=["Mori Aki"], status=["tbr", "reading"], colors=((40, 60, 110), (230, 170, 60)),
+         tags=["Fantasy", "Shounen", "Found Family", ("Violence", "The guild war arc"), "Magic Academy", "Lantern Lore"],
          entries=[("Picked this up from a recommendation. The **first chapter** is gorgeous.", 1, 2),
                   ("The mentor reveal in this arc! ||She knew all along.||", 8, 1),
                   ("Slower chapter, mostly worldbuilding about the lantern guilds.", 12, 0),
                   (None, 15, 1)]),
     dict(title="Salt & Static", fmt="manhwa", unit="chapter", total=88,
          authors=["Han Yerin"], status=["reading"], colors=((20, 90, 90), (200, 230, 220)),
+         tags=["Sci-Fi", "Slow Burn", ("Enemies to Lovers", "Rival radio stations, then not rivals"), "Angst", "Grief"],
          entries=[("Art style takes a minute to get used to, but the paneling is clever.", 4, 1),
                   ("Logged this one in volumes by mistake.", 2, 0, "volume"),
                   ("Halfway. The radio-tower episode made me tear up.", 44, 2)]),
     dict(title="Moonlit Ledger", fmt="light_novel", unit="volume", total=12,
          authors=["Kisaragi Tomo"], artists=["Natsume Ren"], status=["reading", "paused"],
+         tags=["Fantasy", "Mystery", "Court Politics", "Hidden Identity"],
          colors=((70, 40, 90), (240, 200, 220)),
          entries=[("Volume 1 is all setup, but the ledger magic system is fun.", 1, 0),
                   ("Pausing until the next translated volume comes out.", 3, 0)]),
     dict(title="Second Spring at Hanamura High", fmt="manga", unit="chapter", total=64,
          authors=["Aoyama Sei"], status=["reading", "completed", "reading"], colors=((230, 120, 140), (255, 240, 200)),
+         tags=["Slice of Life", "Shoujo", "School", "Cozy", "Found Family", "Slow Burn", "Happy Ending"],
          rating=9.5, review="Comfort read. The ending is earned.",
          entries=[("Rereading this because I missed these kids.", 6, 1)]),
     dict(title="Paper Cranes Over Kessler Street", fmt="fanfic", unit="chapter", total=None,
          authors=["inkwellwren"], status=["completed"], colors=((240, 240, 235), (120, 130, 150)),
+         tags=["Fanfiction", "Boys' Love", "Hurt/Comfort", ("Major Character Death", "Temporary, but still"), "Multiple POV"],
          entries=[]),
 ]
 
@@ -97,6 +102,12 @@ def seed(app, c, folder):
                 day += 1
                 add_status_change(c, wid, old, s, f"2026-09-{day:02d}T10:00:00Z")
                 old = s
+            # Tags: a name, or (name, reason). A name that isn't a starter tag becomes a new, uncategorized one.
+            for tag in spec.get("tags", []):
+                name, reason = tag if isinstance(tag, tuple) else (tag, None)
+                c.execute("INSERT OR IGNORE INTO tag(name) VALUES (?)", (name,))
+                tid = c.execute("SELECT id FROM tag WHERE name = ?", (name,)).fetchone()[0]
+                c.execute("INSERT INTO work_tag(work_id, tag_id, justification_md) VALUES (?,?,?)", (wid, tid, reason))
             if spec["title"].startswith("Second Spring"):
                 c.execute("UPDATE work SET progress_current = 0 WHERE id = ?", (wid,))
             for i, entry in enumerate(spec["entries"]):

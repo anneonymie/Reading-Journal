@@ -3,15 +3,23 @@ Updates to the Reading Journal app. The current app version appears at the botto
 
 ## Unreleased
 
+- Tags! Add them to a work from the Tags box on its page: start typing and pick a suggestion, or press Enter to create a new tag. Suggestions find other names for a tag (typing "yaoi" finds Boys' Love), forgive typos, and suggest tags you often use together.
+- Click a tag on a work to choose its category, mark it as a content warning, or note why it applies to that work.
+- Content warnings are listed separately from the other tags on a work's page.
+- New Tags page, linked at the top: every tag grouped by category, with each category's description. Categories can be renamed, recolored, described, added, deleted and dragged into a new order.
+- Each tag has its own page with its description, other names, the works that use it, and a link to show them in the library.
+- The library can show just the works with one tag.
+- The journal comes with a starter set of about 230 tags in nine categories, with names familiar from Goodreads, AO3, AniList and MangaUpdates. Your journal is updated to add them the first time you start this version, after saving a backup.
+
 ## 0.4.0 (2026-11-10)
 
-- Images in entries are put in order by dragging them. The arrow buttons are gone.
+- Implemented drag-and-drop to reorder images. In Javascript, all things are possible. 
 - Edit Journal Entry: new images appear alongside the saved ones and can be placed anywhere among them before saving.
-- Edit Journal Entry: a red × removes an image straight away instead of a Remove tick box. Nothing is deleted until you save, so Cancel brings it back.
+- Edit Journal Entry: a red × removes an image straight away instead of a Remove tick box. 
 - Work pages: notes show as formatted text, with an Edit button to change them, like journal entries.
 - Work pages: Edit Details is now a button to the right of the title.
 - Work pages: the cover is larger in a wide browser window.
-- New Credits page, linked from the footer, lists the logo, font and other borrowed work with their licences.
+- New Credits page, linked from the footer, lists the logo, font and other borrowed work with their licenses.
 
 ## 0.3.0 (2026-10-25)
 

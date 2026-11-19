@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "_macros.html" import tag_chip %}
+{% block title %}Tags | Reading Journal{% endblock %}
+{% block content %}
+<div class="work">
+  <div class="title-row">
+    <h1>Tags</h1>
+  </div>
+  <form class="tag-add" method="post" action="{{ url_for('journal.tag_create') }}">
+    <label for="tag-input" class="visually-hidden">Find or create a tag</label>
+    <div class="tag-input-wrap">
+      <input id="tag-input" name="name" maxlength="100" autocomplete="off" placeholder="Find or create a tag" data-tag-input>
+    </div>
+    <button type="submit" class="secondary small">Go</button>
+  </form>
+  <p class="hint">Click a tag to see its works and edit it. Drag a category by its name to change the order.</p>
+
+  <div class="categories" data-category-list>
+    {% for g in groups %}
+    {% set c = g.category %}
+    <section class="category" style="--cat: {{ c.color if c else '#808080' }}"
+             {% if c %}id="category-{{ c.id }}" data-id="{{ c.id }}"{% else %}id="uncategorized"{% endif %}>
+      {% if c %}
+      <div data-inline-edit>
+        <div data-view>
+          <div class="category-head">
+            <h2><span class="swatch" aria-hidden="true"></span>{{ c.name }} <span class="count">{{ g.tags|length }}</span></h2>
+            <button type="button" class="link" data-edit>Edit</button>
+          </div>
+          {% if c.description_md %}<div class="prose category-desc">{{ c.description_md|md }}</div>{% endif %}
+        </div>
+        <form method="post" action="{{ url_for('journal.category_update', cat_id=c.id) }}" class="stack category-form" data-form hidden>
+          <div class="row">
+            <label class="field"><span>Name</span><input name="name" value="{{ c.name }}" maxlength="60" required></label>
+            <label class="field color-field"><span>Color</span><input type="color" name="color" value="{{ c.color }}"></label>
+          </div>
+          <label class="field">
+            <span>Description</span>
+            <textarea name="description_md" rows="2" data-ctrl-enter>{{ c.description_md or "" }}</textarea>
+          </label>
+          <div class="actions">
+            <button type="submit" class="secondary">Save category</button>
+            <button type="button" class="link" data-cancel>Cancel</button>
+            <button type="submit" class="link danger-text" formaction="{{ url_for('journal.category_delete', cat_id=c.id) }}"
+                    data-confirm="Delete the category {{ c.name }}? Its {{ g.tags|length }} tags stay, as Uncategorized.">Delete category</button>
+          </div>
+        </form>
+      </div>
+      {% else %}
+      <div class="category-head">
+        <h2><span class="swatch" aria-hidden="true"></span>Uncategorized <span class="count">{{ g.tags|length }}</span></h2>
+      </div>
+      <p class="hint">New tags start here. Open one to give it a category.</p>
+      {% endif %}
+      {% if g.tags %}
+      <ul class="chips">
+        {% for t in g.tags %}<li>{{ tag_chip(t) }}{% if t.uses %} <span class="uses">{{ t.uses }}</span>{% endif %}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+
+  <details class="panel add-category">
+    <summary>Add a category</summary>
+    <form method="post" action="{{ url_for('journal.category_create') }}" class="stack">
+      <div class="row">
+        <label class="field"><span>Name</span><input name="name" maxlength="60" required></label>
+        <label class="field color-field"><span>Color</span><input type="color" name="color" value="#808080"></label>
+      </div>
+      <label class="field"><span>Description</span><textarea name="description_md" rows="2"></textarea></label>
+      <div class="actions"><button type="submit" class="secondary">Add category</button></div>
+    </form>
+  </details>
+</div>
+{% endblock %}

@@ -1,0 +1,62 @@
+{# The Tags box on a work page. Also sent on its own after adding, editing or removing a tag,
+   so the page can swap it in without reloading. Needs: work, tags, reasons, categories. #}
+<section class="panel tags-panel" id="tags" aria-labelledby="tags-heading">
+  <h2 id="tags-heading" class="panel-title">Tags</h2>
+  {% set cws = tags|selectattr('is_cw')|list %}
+  {% set rest = tags|rejectattr('is_cw')|list %}
+  {% for group in [cws, rest] if group %}
+  <div class="{{ 'cw-list' if loop.first and cws else 'tag-cloud' }}">
+    {% if loop.first and cws %}<span class="cw-label">Content warnings</span>{% endif %}
+    <ul class="chips">
+      {% for t in group %}
+      <li>
+        {# Clicking a tag opens this pop-up: its category and CW (for every work) and this work's reason. #}
+        <details class="tag-edit" data-tag-popup>
+          <summary class="chip{% if t.is_cw %} cw{% endif %}" style="--cat: {{ t.color }}"
+                   title="{{ t.category_name }}{% if reasons.get(t.id) %}: {{ reasons[t.id] }}{% endif %}">
+            {{- t.name -}}{% if reasons.get(t.id) %}<span class="has-reason" aria-label="(has a reason)">*</span>{% endif -%}
+          </summary>
+          <div class="tag-pop">
+            <form method="post" action="{{ url_for('journal.work_tag_update', work_id=work.id, tag_id=t.id) }}"
+                  data-swap="#tags" class="stack">
+              <label class="field">
+                <span>Category</span>
+                <select name="category">
+                  <option value="">Uncategorized</option>
+                  {% for c in categories %}
+                    <option value="{{ c.id }}" {% if c.id == t.category_id %}selected{% endif %}>{{ c.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="check"><input type="checkbox" name="cw" value="1" {% if t.is_cw %}checked{% endif %}> Content warning</label>
+              <p class="hint">Category and content warning change this tag on every work.</p>
+              <label class="field">
+                <span>Why it applies to this work (optional)</span>
+                <textarea name="reason" rows="2">{{ reasons.get(t.id) or "" }}</textarea>
+              </label>
+              <div class="actions">
+                <button type="submit" class="small">Save</button>
+                <a href="{{ url_for('journal.tag_page', tag_id=t.id) }}">Open tag page</a>
+              </div>
+            </form>
+            <form method="post" action="{{ url_for('journal.work_tag_remove', work_id=work.id, tag_id=t.id) }}" data-swap="#tags">
+              <button type="submit" class="link">Remove from this work</button>
+            </form>
+          </div>
+        </details>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  <p class="hint">No tags yet.</p>
+  {% endfor %}
+  <form class="tag-add" method="post" action="{{ url_for('journal.work_tag_add', work_id=work.id) }}" data-swap="#tags">
+    <label for="tag-input" class="visually-hidden">Add a tag</label>
+    <div class="tag-input-wrap">
+      <input id="tag-input" name="name" maxlength="100" autocomplete="off" placeholder="Add a tag"
+             data-tag-input data-work="{{ work.id }}">
+    </div>
+    <button type="submit" class="secondary small">Add</button>
+  </form>
+</section>

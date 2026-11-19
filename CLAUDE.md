@@ -20,12 +20,13 @@ Flask app served by waitress. Server-rendered Jinja templates; plain SQL through
 
 - `run.py`: entry point. Reads `JOURNAL_DATA`, `JOURNAL_HOST`, `JOURNAL_PORT` and starts waitress. `start.bat` sets up `.venv` and runs it.
 - `journal/__init__.py`: `VERSION` (the release version, shown in the footer) and `create_app(data_dir)`, which creates the data folder, runs `init_db` and closes the per-request connection on teardown.
-- `journal/db.py`: `connect()` (the only way to open a connection; turns on foreign keys), `init_db()` (creates, upgrades or refuses the database), `MIGRATIONS` (upgrade steps), `SetupError`.
+- `journal/db.py`: `connect()` (the only way to open a connection; turns on foreign keys), `init_db()` (creates, upgrades or refuses the database), `MIGRATIONS` (upgrade steps), `load_starter_tags()`, `SetupError`.
+- `journal/starter_tags.json`: the starter tag categories and tags, loaded into a new journal and by the version 5 upgrade.
 - `journal/views.py`: every route, in one blueprint `bp`, plus form parsing and validation. Get the request's connection with `db()`. `/media/<path>` serves images from the data folder.
 - `journal/images.py`: `store_image()`. Validates uploads with Pillow and stores them as `images/<sha[:2]>/<sha>.<ext>`, deduped by hash.
 - `journal/text.py`: Markdown rendering (raw HTML disabled), UTC timestamp helpers, number formatting.
-- `journal/templates/`: Jinja templates. `base.html` is the layout (header, footer with links and version); `_macros.html` holds shared bits; `credits.html` is the `/credits` page, linked from the footer.
-- `journal/static/`: `style.css`, `app.js` (page behaviour; JavaScript is required, pages don't need to work without it), `Sortable.min.js` (SortableJS 1.15.6, drag-and-drop ordering, bundled with its licence `MIT-sortablejs.txt`), bundled fonts with their licence, `emojione-notebook.svg` (logo and tab icon; EmojiOne's icon, recolored by me). CC BY 4.0 requires a credit on `/credits`: creator, that it was changed, and a link to the licence. Keep all three. Anything new bundled from someone else gets its licence file in `static/` and an entry on `/credits`. Bundle libraries rather than loading them from another website.
+- `journal/templates/`: Jinja templates. `base.html` is the layout (header, footer with links and version); `_macros.html` holds shared bits; `credits.html` is the `/credits` page, linked from the footer. `_work_tags.html` is a work's Tags box; forms marked `data-swap` post in the background and the server returns just that box (request header `X-Partial`).
+- `journal/static/`: `style.css`, `app.js` (page behavior; JavaScript is required, pages don't need to work without it), `Sortable.min.js` (SortableJS 1.15.6, drag-and-drop ordering, bundled with its license `MIT-sortablejs.txt`), bundled fonts with their license, `emojione-notebook.svg` (logo and tab icon; EmojiOne's icon, recolored by me). CC BY 4.0 requires a credit on `/credits`: creator, that it was changed, and a link to the license. Keep all three. Anything new bundled from someone else gets its license file in `static/` and an entry on `/credits`. Bundle libraries rather than loading them from another website.
 - `Dockerfile`, `docker-compose.yml`: home server deployment. The data folder is mounted at `/data`.
 
 ## Commands

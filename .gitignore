@@ -5,6 +5,9 @@ journal-demo/
 # My informal to-do list
 thonks.md
 
+# Draft of the starter tag list, until it's final
+tag_list_draft.md
+
 # Python
 .venv/
 __pycache__/

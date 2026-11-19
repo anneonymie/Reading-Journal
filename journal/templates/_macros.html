@@ -35,6 +35,13 @@
 </details>
 {% endmacro %}
 
+{# A tag as a colored link to its page. t needs id, name, color, category_name and is_cw. #}
+{% macro tag_chip(t, href=None) -%}
+<a class="chip{% if t.is_cw %} cw{% endif %}" style="--cat: {{ t.color }}"
+   href="{{ href or url_for('journal.tag_page', tag_id=t.id) }}"
+   title="{{ t.category_name }}{% if t.is_cw %}, content warning{% endif %}">{{ t.name }}</a>
+{%- endmacro %}
+
 {% macro cover(path, title, cls="cover") %}
 {% if path %}
   <img class="{{ cls }}" src="{{ url_for('journal.media', rel=path) }}" alt="Cover of {{ title }}" loading="lazy">

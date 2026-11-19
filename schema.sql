@@ -371,13 +371,22 @@ CREATE TABLE work_gallery (
 -- Tags (one shared pool for works and images)
 -- ============================================================
 
+-- Categories group tags and give them a color. Editable; position sets their order.
+CREATE TABLE tag_category (
+    id             INTEGER PRIMARY KEY,
+    name           TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    color          TEXT NOT NULL DEFAULT '#808080'
+                   CHECK (length(color) = 7 AND color GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+    description_md TEXT,
+    position       INTEGER NOT NULL DEFAULT 0
+) STRICT;
+
 CREATE TABLE tag (
     id             INTEGER PRIMARY KEY,
     name           TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    category       TEXT NOT NULL DEFAULT 'misc'
-                   CHECK (category IN ('genre','trope','device','misc')),
     parent_id      INTEGER REFERENCES tag(id) ON DELETE SET NULL,
     description_md TEXT,
+    category_id    INTEGER REFERENCES tag_category(id) ON DELETE SET NULL,   -- NULL = Uncategorized
     CHECK (parent_id IS NULL OR parent_id <> id)
 ) STRICT;
 
@@ -649,4 +658,4 @@ CREATE TABLE app_setting (
 ) STRICT;
 
 -- Schema version, for future migrations
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;

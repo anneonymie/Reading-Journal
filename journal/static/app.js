@@ -1,4 +1,4 @@
-// Page behaviour: dates, confirmations, repeating rows and the image controls.
+// Page behavior: dates, confirmations, repeating rows and the image controls.
 (function () {
   "use strict";
 
@@ -31,10 +31,15 @@
     hidden.after(picker);
   });
 
-  // Ask before destructive actions.
+  // Ask before destructive actions: a whole form, or one button in a form.
   document.querySelectorAll("form[data-confirm]").forEach((form) => {
     form.addEventListener("submit", (e) => {
       if (!window.confirm(form.dataset.confirm)) e.preventDefault();
+    });
+  });
+  document.querySelectorAll("button[data-confirm]").forEach((button) => {
+    button.addEventListener("click", (e) => {
+      if (!window.confirm(button.dataset.confirm)) e.preventDefault();
     });
   });
 
@@ -199,4 +204,180 @@
     }
     sync();
   });
+
+  // ---------- tags
+
+  // Forms marked data-swap post in the background; the server sends back the box named by
+  // data-swap (e.g. #tags), which replaces the old one. Nothing else on the page reloads.
+  document.addEventListener("submit", async (e) => {
+    const form = e.target.closest("form[data-swap]");
+    if (!form || e.defaultPrevented) return;
+    e.preventDefault();
+    const body = new FormData(form);
+    // Adding a tag: empty the box straight away, so typing the next tag can start while this one saves.
+    const typing = form.matches(".tag-add") ? form.querySelector("[data-tag-input]") : null;
+    if (typing) typing.value = "";
+    let response;
+    try {
+      response = await fetch(form.action, { method: "POST", body, headers: { "X-Partial": "1" } });
+    } catch (_) {
+      response = null;
+    }
+    if (!response || !response.ok) {   // put things back and let the page show what went wrong
+      if (typing) typing.value = body.get("name");
+      HTMLFormElement.prototype.submit.call(form);
+      return;
+    }
+    document.querySelector(form.dataset.swap).outerHTML = await response.text();
+    if (typing) {   // carry over anything typed meanwhile, and stay ready for the next tag
+      const fresh = document.querySelector(`${form.dataset.swap} [data-tag-input]`);
+      fresh.value = typing.value;
+      fresh.focus();
+      if (fresh.value) fresh.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+
+  // Tag pop-ups: one open at a time; a click elsewhere or Escape closes it.
+  document.addEventListener("toggle", (e) => {
+    if (e.target.matches?.("[data-tag-popup]") && e.target.open) {
+      document.querySelectorAll("[data-tag-popup][open]").forEach((d) => { if (d !== e.target) d.open = false; });
+      // Near the right edge of the screen, slide the pop-up left so it stays visible.
+      const pop = e.target.querySelector(".tag-pop");
+      pop.style.left = "0px";
+      const overflow = pop.getBoundingClientRect().right - (document.documentElement.clientWidth - 8);
+      if (overflow > 0) pop.style.left = `${-overflow}px`;
+    }
+  }, true);
+  document.addEventListener("click", (e) => {
+    document.querySelectorAll("[data-tag-popup][open]").forEach((d) => { if (!d.contains(e.target)) d.open = false; });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    document.querySelectorAll("[data-tag-popup][open]").forEach((d) => { d.open = false; d.querySelector("summary").focus(); });
+  });
+
+  // Typing a tag: suggestions from the clever search appear under the box. Up/Down move through them,
+  // Enter picks the highlighted one (or, with none highlighted, adds what was typed), Escape closes them.
+  const suggestBox = (input) => {
+    let list = input.parentElement.querySelector(".tag-suggest");
+    if (!list) {
+      list = document.createElement("ul");
+      list.className = "tag-suggest";
+      list.id = `${input.id}-suggestions`;
+      list.setAttribute("role", "listbox");
+      list.hidden = true;
+      input.after(list);
+      input.setAttribute("role", "combobox");
+      input.setAttribute("aria-controls", list.id);
+      input.setAttribute("aria-expanded", "false");
+    }
+    return list;
+  };
+  const closeSuggestions = (input) => {
+    const list = suggestBox(input);
+    list.hidden = true;
+    list.innerHTML = "";
+    input.setAttribute("aria-expanded", "false");
+  };
+  const pick = (input, li) => {
+    closeSuggestions(input);
+    if (li.dataset.onWork) { input.value = ""; return; }   // nothing to add
+    input.value = li.dataset.name;
+    input.form.requestSubmit();
+  };
+  let pending = 0;
+  document.addEventListener("input", async (e) => {
+    const input = e.target;
+    if (!input.matches?.("[data-tag-input]")) return;
+    const q = input.value.trim();
+    const ticket = ++pending;
+    if (!q) { closeSuggestions(input); return; }
+    await new Promise((r) => setTimeout(r, 120));   // wait for a pause in typing
+    if (ticket !== pending) return;
+    const params = new URLSearchParams({ q });
+    if (input.dataset.work) params.set("work", input.dataset.work);
+    let found = [];
+    try {
+      found = await (await fetch(`/tags/suggest?${params}`)).json();
+    } catch (_) { /* no suggestions this time */ }
+    if (ticket !== pending) return;
+    const list = suggestBox(input);
+    list.innerHTML = "";
+    const exact = found.some((s) => s.on_work || s.name.toLowerCase() === q.toLowerCase()
+      || (s.alias || "").toLowerCase() === q.toLowerCase());   // the typed text is already a tag: nothing to create
+    found.forEach((s, i) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.id = `${list.id}-${i}`;
+      li.dataset.name = s.name;
+      const dot = document.createElement("span");
+      dot.className = "swatch";
+      dot.style.setProperty("--cat", s.color);
+      const name = document.createElement("span");
+      name.textContent = s.name;
+      const why = document.createElement("span");
+      why.className = "why";
+      why.textContent = s.on_work ? "already on this work" : s.alias ? `also called ${s.alias}`
+        : s.similar_to ? `often with ${s.similar_to}` : s.category;
+      if (s.on_work) li.dataset.onWork = "1";
+      li.append(dot, name, why);
+      list.appendChild(li);
+    });
+    if (!exact) {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.id = `${list.id}-new`;
+      li.className = "create";
+      li.dataset.name = q;
+      li.textContent = `Create “${q}” (Uncategorized)`;
+      list.appendChild(li);
+    }
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  });
+  document.addEventListener("keydown", (e) => {
+    const input = e.target;
+    if (!input.matches?.("[data-tag-input]")) return;
+    const list = suggestBox(input);
+    const items = Array.from(list.children);
+    const current = items.findIndex((li) => li.getAttribute("aria-selected") === "true");
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && items.length && !list.hidden) {
+      e.preventDefault();
+      const next = e.key === "ArrowDown" ? Math.min(current + 1, items.length - 1) : Math.max(current - 1, 0);
+      items.forEach((li, i) => li.setAttribute("aria-selected", String(i === next)));
+      input.setAttribute("aria-activedescendant", items[next].id);
+    } else if (e.key === "Enter" && current >= 0 && !list.hidden) {
+      e.preventDefault();
+      pick(input, items[current]);
+    } else if (e.key === "Escape" && !list.hidden) {
+      e.stopPropagation();
+      closeSuggestions(input);
+    }
+  });
+  document.addEventListener("mousedown", (e) => {
+    const li = e.target.closest(".tag-suggest li");
+    if (li) {
+      e.preventDefault();   // keep focus in the box
+      pick(li.closest(".tag-input-wrap").querySelector("[data-tag-input]"), li);
+    }
+  });
+  document.addEventListener("focusout", (e) => {
+    if (e.target.matches?.("[data-tag-input]")) closeSuggestions(e.target);
+  });
+
+  // Tags page: drag categories into order; the new order saves straight away.
+  const categoryList = document.querySelector("[data-category-list]");
+  if (categoryList && window.Sortable) {
+    Sortable.create(categoryList, {
+      animation: 150,
+      draggable: ".category[data-id]",
+      handle: ".category-head h2",
+      delay: 150, delayOnTouchOnly: true,
+      onEnd: () => {
+        const body = new FormData();
+        categoryList.querySelectorAll(".category[data-id]").forEach((s) => body.append("order", s.dataset.id));
+        fetch("/categories/order", { method: "POST", body, headers: { "X-Partial": "1" } });
+      },
+    });
+  }
 })();

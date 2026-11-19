@@ -1,11 +1,12 @@
 """Pages and form handlers."""
+import difflib
 import math
 import re
 import sqlite3
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from flask import (Blueprint, abort, current_app, flash, g, redirect, render_template,
+from flask import (Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template,
                    request, send_from_directory, url_for)
 
 from .db import connect
@@ -14,14 +15,14 @@ from .text import now_utc, parse_utc
 
 bp = Blueprint("journal", __name__)
 
-# How a pasted link is recognised as a source and turned into its ID.
+# How a pasted link is recognized as a source and turned into its ID.
 SOURCE_PATTERNS = {
     "anilist": [r"anilist\.co/(?:manga|anime)/(\d+)"],
     "mangaupdates": [r"mangaupdates\.com/series/([0-9a-z]+)", r"mangaupdates\.com/series\.html\?id=(\d+)"],
     "ao3": [r"archiveofourown\.org/works/(\d+)"],
 }
 PUB_STATUSES = [("", "Unknown"), ("ongoing", "Ongoing"), ("completed", "Completed"),
-                ("hiatus", "On hiatus"), ("cancelled", "Cancelled")]
+                ("hiatus", "On hiatus"), ("cancelled", "Canceled")]
 MAX_TITLE = 300
 # Creator roles the work form manages: stored role -> label shown. A creator added
 # with neither role ticked gets the single role NO_ROLE and is shown with no label.
@@ -188,6 +189,11 @@ def library():
     valid = {r["code"] for r in c.execute("SELECT code FROM status")}
     if status not in valid:
         status = None
+    tag = None
+    if request.args.get("tag", "").isdigit():
+        tag = c.execute(f"{TAG_SELECT} WHERE t.id = ?", (int(request.args["tag"]),)).fetchone()
+    tag_id = tag["id"] if tag else None
+    tagged = "(? IS NULL OR w.id IN (SELECT work_id FROM work_tag WHERE tag_id = ?))"
     works = c.execute(
         """SELECT w.id, w.title, f.label AS format_label, i.file_path AS cover_path,
                   cs.status_code, s.label AS status_label, w.progress_current, w.length_total,
@@ -200,15 +206,17 @@ def library():
            LEFT JOIN image i ON i.id = w.cover_image_id
            JOIN work_current_status cs ON cs.work_id = w.id
            LEFT JOIN status s ON s.code = cs.status_code
-           WHERE ? IS NULL OR cs.status_code = ?
-           ORDER BY last_active DESC, w.id DESC""",
-        (status, status),
+           WHERE (? IS NULL OR cs.status_code = ?) AND {tagged}
+           ORDER BY last_active DESC, w.id DESC""".replace("{tagged}", tagged),
+        (status, status, tag_id, tag_id),
     ).fetchall()
+    # The status counts follow the tag filter, so they match what each tab shows.
     counts = {r["status_code"]: r["n"] for r in c.execute(
-        "SELECT status_code, COUNT(*) AS n FROM work_current_status GROUP BY status_code")}
-    total = c.execute("SELECT COUNT(*) FROM work").fetchone()[0]
+        f"""SELECT cs.status_code, COUNT(*) AS n FROM work_current_status cs JOIN work w ON w.id = cs.work_id
+            WHERE {tagged} GROUP BY cs.status_code""", (tag_id, tag_id))}
+    total = c.execute(f"SELECT COUNT(*) FROM work w WHERE {tagged}", (tag_id, tag_id)).fetchone()[0]
     return render_template("library.html", works=works, status=status, counts=counts,
-                           total=total, **lookups())
+                           total=total, tag=tag, **lookups())
 
 
 # ------------------------------------------------------------------ add / edit works
@@ -478,6 +486,7 @@ def render_work(work_id, composer=None, errors=None, status=200):
     return render_template("work.html", work=work, alt_titles=alt_titles, creators=creators,
                            publishers=work_publishers(work_id), work_sources=work_sources(work_id),
                            entries=entries, images=images,
+                           tags=work_tags(work_id), reasons=work_tag_reasons(work_id), categories=categories(),
                            completions=completions["completions"] if completions else 0,
                            composer=composer, errors=errors or [], **lookups()), status
 
@@ -701,6 +710,311 @@ def entry_delete(entry_id):
     return redirect(url_for(".work_page", work_id=entry["work_id"]) + "#latest")
 
 
+# ------------------------------------------------------------------ tags
+
+UNCATEGORIZED_COLOR = "#808080"
+MAX_TAG_NAME = 100
+HEX_COLOR = re.compile(r"#[0-9a-f]{6}")
+# One tag with everything a chip needs: its category's name and color, and whether it's a CW.
+TAG_SELECT = """SELECT t.id, t.name, t.description_md, t.category_id, t.parent_id,
+                       coalesce(c.name, 'Uncategorized') AS category_name,
+                       coalesce(c.color, '#808080') AS color, c.position AS category_position,
+                       EXISTS (SELECT 1 FROM cw_setting WHERE tag_id = t.id) AS is_cw
+                FROM tag t LEFT JOIN tag_category c ON c.id = t.category_id"""
+CATEGORY_ORDER = "c.position IS NULL, c.position, t.name COLLATE NOCASE"   # uncategorized last
+
+
+def categories():
+    return db().execute("SELECT * FROM tag_category ORDER BY position, name").fetchall()
+
+
+def get_tag_or_404(tag_id):
+    row = db().execute(f"{TAG_SELECT} WHERE t.id = ?", (tag_id,)).fetchone()
+    if row is None:
+        abort(404)
+    return row
+
+
+def clean_tag_name(raw):
+    return " ".join((raw or "").split())[:MAX_TAG_NAME]
+
+
+def find_tag(name):
+    """The tag with this name or alias (capitals don't matter), or None."""
+    row = db().execute("""SELECT id FROM tag WHERE name = ?
+                          UNION ALL SELECT tag_id FROM tag_alias WHERE alias = ? LIMIT 1""", (name, name)).fetchone()
+    return row[0] if row else None
+
+
+def find_or_create_tag(c, name):
+    """Typing a name that doesn't exist yet creates it, uncategorized."""
+    return find_tag(name) or c.execute("INSERT INTO tag(name) VALUES (?)", (name,)).lastrowid
+
+
+def suggest_tags(query, exclude=(), limit=8):
+    """Clever tag search: exact name or alias, then names starting with it, then words starting
+    with it, then anything containing it, then near misses (typos). If there's room left,
+    tags often used on the same works as the best match follow, marked as similar."""
+    q = " ".join(query.split()).casefold()
+    if not q:
+        return []
+    terms = db().execute("""SELECT name AS term, id AS tag_id, 0 AS is_alias FROM tag
+                            UNION ALL SELECT alias, tag_id, 1 FROM tag_alias""").fetchall()
+    best = {}
+    for term, tag_id, is_alias in terms:
+        t = term.casefold()
+        if t == q:
+            rank = 0
+        elif t.startswith(q):
+            rank = 1
+        elif any(w.startswith(q) for w in re.split(r"[\s/\-:]+", t)):
+            rank = 2
+        elif q in t:
+            rank = 3
+        elif len(q) >= 3 and difflib.SequenceMatcher(None, q, t).ratio() >= 0.75:
+            rank = 4
+        else:
+            continue
+        if tag_id not in exclude and (tag_id not in best or rank < best[tag_id][0]):
+            best[tag_id] = (rank, term if is_alias else None)
+    tags = {t["id"]: t for t in db().execute(TAG_SELECT)}
+    found = []
+    for tag_id, (rank, alias) in best.items():
+        tag = tags[tag_id]
+        found.append({"id": tag_id, "name": tag["name"], "color": tag["color"], "alias": alias,
+                      "category": tag["category_name"], "rank": rank})
+    found.sort(key=lambda s: (s["rank"], len(s["name"]), s["name"].casefold()))
+    found = found[:limit]
+    if found and len(found) < limit:
+        taken = {s["id"] for s in found} | set(exclude)
+        for row in db().execute(f"""{TAG_SELECT} JOIN (
+                    SELECT b.tag_id, COUNT(*) AS n FROM work_tag a JOIN work_tag b ON b.work_id = a.work_id
+                    WHERE a.tag_id = ? AND b.tag_id <> a.tag_id GROUP BY b.tag_id) s ON s.tag_id = t.id
+                    ORDER BY s.n DESC, t.name COLLATE NOCASE""", (found[0]["id"],)):
+            if len(found) >= limit:
+                break
+            if row["id"] not in taken:
+                found.append({"id": row["id"], "name": row["name"], "color": row["color"], "alias": None,
+                              "category": row["category_name"], "similar_to": found[0]["name"]})
+    for s in found:
+        s.pop("rank", None)
+    return found
+
+
+@bp.get("/tags/suggest")
+def tags_suggest():
+    q = request.args.get("q", "")
+    exclude = ()
+    if request.args.get("work", "").isdigit():
+        exclude = {r[0] for r in db().execute("SELECT tag_id FROM work_tag WHERE work_id = ?",
+                                              (int(request.args["work"]),))}
+    found = suggest_tags(q, exclude)
+    # Typing the name or alias of a tag the work already has says so, rather than offering to create it.
+    already = find_tag(" ".join(q.split()))
+    if already in exclude:
+        tag = get_tag_or_404(already)
+        found.insert(0, {"id": already, "name": tag["name"], "color": tag["color"], "alias": None,
+                         "category": tag["category_name"], "on_work": True})
+    return jsonify(found)
+
+
+def work_tags(work_id):
+    return db().execute(f"""{TAG_SELECT} JOIN work_tag wt ON wt.tag_id = t.id AND wt.work_id = ?
+                            ORDER BY {CATEGORY_ORDER}""", (work_id,)).fetchall()
+
+
+def work_tag_reasons(work_id):
+    return {r["tag_id"]: r["justification_md"] for r in db().execute(
+        "SELECT tag_id, justification_md FROM work_tag WHERE work_id = ?", (work_id,))}
+
+
+def after_work_tags(work_id):
+    """The browser's script asks for just the tags box back; without it, return to the page."""
+    if request.headers.get("X-Partial"):
+        return render_template("_work_tags.html", work=get_work_or_404(work_id), tags=work_tags(work_id),
+                               reasons=work_tag_reasons(work_id), categories=categories())
+    return redirect(url_for(".work_page", work_id=work_id) + "#tags")
+
+
+def set_cw(c, tag_id, on):
+    if on:
+        c.execute("INSERT OR IGNORE INTO cw_setting(tag_id) VALUES (?)", (tag_id,))
+    else:
+        c.execute("DELETE FROM cw_setting WHERE tag_id = ?", (tag_id,))
+
+
+def read_category_id(raw):
+    """A category id from a form, or None for Uncategorized (and for anything unknown)."""
+    if raw and raw.isdigit() and db().execute("SELECT 1 FROM tag_category WHERE id = ?", (int(raw),)).fetchone():
+        return int(raw)
+    return None
+
+
+@bp.post("/works/<int:work_id>/tags")
+def work_tag_add(work_id):
+    get_work_or_404(work_id)
+    name = clean_tag_name(request.form.get("name"))
+    if name:
+        with db() as c:
+            tag_id = find_or_create_tag(c, name)
+            c.execute("INSERT OR IGNORE INTO work_tag(work_id, tag_id) VALUES (?, ?)", (work_id, tag_id))
+    return after_work_tags(work_id)
+
+
+@bp.post("/works/<int:work_id>/tags/<int:tag_id>")
+def work_tag_update(work_id, tag_id):
+    """The pop-up on a tag: the tag's category and CW (shared by every work), and this work's reason."""
+    get_work_or_404(work_id)
+    get_tag_or_404(tag_id)
+    reason = (request.form.get("reason") or "").strip() or None
+    with db() as c:
+        c.execute("UPDATE tag SET category_id = ? WHERE id = ?", (read_category_id(request.form.get("category")), tag_id))
+        set_cw(c, tag_id, request.form.get("cw") == "1")
+        c.execute("UPDATE work_tag SET justification_md = ? WHERE work_id = ? AND tag_id = ?", (reason, work_id, tag_id))
+    return after_work_tags(work_id)
+
+
+@bp.post("/works/<int:work_id>/tags/<int:tag_id>/remove")
+def work_tag_remove(work_id, tag_id):
+    get_work_or_404(work_id)
+    with db() as c:
+        c.execute("DELETE FROM work_tag WHERE work_id = ? AND tag_id = ?", (work_id, tag_id))
+    return after_work_tags(work_id)
+
+
+@bp.get("/tags")
+def tags_page():
+    c = db()
+    groups = [{"category": cat, "tags": []} for cat in categories()]
+    by_id = {g["category"]["id"]: g for g in groups}
+    loose = {"category": None, "tags": []}
+    uses = dict(c.execute("SELECT tag_id, COUNT(*) FROM work_tag GROUP BY tag_id").fetchall())
+    for t in c.execute(f"{TAG_SELECT} ORDER BY t.name COLLATE NOCASE"):
+        by_id.get(t["category_id"], loose)["tags"].append({**dict(t), "uses": uses.get(t["id"], 0)})
+    if loose["tags"]:
+        groups.append(loose)
+    return render_template("tags.html", groups=groups)
+
+
+@bp.post("/tags")
+def tag_create():
+    """Find or create a tag by name and open its page."""
+    name = clean_tag_name(request.form.get("name"))
+    if not name:
+        return redirect(url_for(".tags_page"))
+    with db() as c:
+        tag_id = find_or_create_tag(c, name)
+    return redirect(url_for(".tag_page", tag_id=tag_id))
+
+
+@bp.get("/tags/<int:tag_id>")
+def tag_page(tag_id):
+    tag = get_tag_or_404(tag_id)
+    c = db()
+    works = c.execute("""SELECT w.id, w.title, i.file_path AS cover_path, f.label AS format_label, wt.justification_md
+                         FROM work_tag wt JOIN work w ON w.id = wt.work_id
+                         JOIN format f ON f.code = w.format_code
+                         LEFT JOIN image i ON i.id = w.cover_image_id
+                         WHERE wt.tag_id = ? ORDER BY w.title COLLATE NOCASE""", (tag_id,)).fetchall()
+    aliases = [r[0] for r in c.execute("SELECT alias FROM tag_alias WHERE tag_id = ? ORDER BY alias COLLATE NOCASE", (tag_id,))]
+    parent = get_tag_or_404(tag["parent_id"]) if tag["parent_id"] else None
+    children = c.execute(f"{TAG_SELECT} WHERE t.parent_id = ? ORDER BY t.name COLLATE NOCASE", (tag_id,)).fetchall()
+    return render_template("tag.html", tag=tag, works=works, aliases=aliases, parent=parent,
+                           children=children, categories=categories())
+
+
+@bp.post("/tags/<int:tag_id>")
+def tag_update(tag_id):
+    tag = get_tag_or_404(tag_id)
+    name = clean_tag_name(request.form.get("name")) or tag["name"]
+    other = find_tag(name)
+    if other and other != tag_id:
+        flash(f"There's already a tag or alias called “{name}”, so the name wasn't changed.")
+        name = tag["name"]
+    with db() as c:
+        # Renaming a tag to one of its own aliases swaps them: the alias goes, since a name and alias can't match.
+        c.execute("DELETE FROM tag_alias WHERE alias = ? AND tag_id = ?", (name, tag_id))
+        c.execute("UPDATE tag SET name = ?, category_id = ?, description_md = ? WHERE id = ?",
+                  (name, read_category_id(request.form.get("category")),
+                   (request.form.get("description_md") or "").strip() or None, tag_id))
+        set_cw(c, tag_id, request.form.get("cw") == "1")
+    return redirect(url_for(".tag_page", tag_id=tag_id))
+
+
+@bp.post("/tags/<int:tag_id>/delete")
+def tag_delete(tag_id):
+    tag = get_tag_or_404(tag_id)
+    with db() as c:
+        c.execute("DELETE FROM tag WHERE id = ?", (tag_id,))
+    flash(f"Deleted the tag {tag['name']}.")
+    return redirect(url_for(".tags_page"))
+
+
+def read_category_form(errors, current_id=None):
+    name = " ".join((request.form.get("name") or "").split())[:60]
+    color = (request.form.get("color") or "").lower()
+    if not name:
+        errors.append("A category needs a name.")
+    elif db().execute("SELECT 1 FROM tag_category WHERE name = ? AND id IS NOT ?", (name, current_id)).fetchone():
+        errors.append(f"There's already a category called “{name}”.")
+    if not HEX_COLOR.fullmatch(color):
+        color = UNCATEGORIZED_COLOR
+    return name, color, (request.form.get("description_md") or "").strip() or None
+
+
+@bp.post("/categories")
+def category_create():
+    errors = []
+    name, color, description = read_category_form(errors)
+    if errors:
+        flash(errors[0])
+        return redirect(url_for(".tags_page"))
+    with db() as c:
+        cat_id = c.execute("""INSERT INTO tag_category(name, color, description_md, position)
+                              VALUES (?, ?, ?, (SELECT coalesce(max(position) + 1, 0) FROM tag_category))""",
+                           (name, color, description)).lastrowid
+    return redirect(url_for(".tags_page") + f"#category-{cat_id}")
+
+
+@bp.post("/categories/<int:cat_id>")
+def category_update(cat_id):
+    if not db().execute("SELECT 1 FROM tag_category WHERE id = ?", (cat_id,)).fetchone():
+        abort(404)
+    errors = []
+    name, color, description = read_category_form(errors, cat_id)
+    if errors:
+        flash(errors[0] + " Nothing was changed.")
+    else:
+        with db() as c:
+            c.execute("UPDATE tag_category SET name = ?, color = ?, description_md = ? WHERE id = ?",
+                      (name, color, description, cat_id))
+    return redirect(url_for(".tags_page") + f"#category-{cat_id}")
+
+
+@bp.post("/categories/<int:cat_id>/delete")
+def category_delete(cat_id):
+    row = db().execute("SELECT name FROM tag_category WHERE id = ?", (cat_id,)).fetchone()
+    if row is None:
+        abort(404)
+    with db() as c:
+        c.execute("DELETE FROM tag_category WHERE id = ?", (cat_id,))
+    flash(f"Deleted the category {row['name']}. Its tags are now Uncategorized.")
+    return redirect(url_for(".tags_page"))
+
+
+@bp.post("/categories/order")
+def category_order():
+    """Categories in the order they were dragged into; any left out keep their place after them."""
+    known = [r[0] for r in db().execute("SELECT id FROM tag_category ORDER BY position, name")]
+    sent = [int(x) for x in request.form.getlist("order") if x.isdigit() and int(x) in known]
+    with db() as c:
+        for pos, cat_id in enumerate(dict.fromkeys(sent + known)):
+            c.execute("UPDATE tag_category SET position = ? WHERE id = ?", (pos, cat_id))
+    if request.headers.get("X-Partial"):
+        return "", 204
+    return redirect(url_for(".tags_page"))
+
+
 # ------------------------------------------------------------------ files
 
 CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
@@ -725,7 +1039,7 @@ def credits():
 @bp.get("/media/<path:rel>")
 def media(rel):
     # Only files inside images/ are served. Reject any "..", backslash or empty part outright,
-    # because normalising "images/../journal.db" would otherwise reach the database.
+    # because normalizing "images/../journal.db" would otherwise reach the database.
     parts = rel.split("/")
     if (len(parts) < 2 or parts[0] != "images" or "\\" in rel
             or any(p in ("", ".", "..") for p in parts)):

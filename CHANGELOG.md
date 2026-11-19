@@ -3,6 +3,8 @@ Updates to the Reading Journal app. The current app version appears at the botto
 
 ## Unreleased
 
+## 0.5.0 (2026-11-19)
+
 - Tags! Add them to a work from the Tags box on its page: start typing and pick a suggestion, or press Enter to create a new tag. Suggestions find other names for a tag (typing "yaoi" finds Boys' Love), forgive typos, and suggest tags you often use together.
 - Click a tag on a work to choose its category, mark it as a content warning, or note why it applies to that work.
 - Content warnings are listed separately from the other tags on a work's page.

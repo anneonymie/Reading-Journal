@@ -5,13 +5,13 @@ Updates to the Reading Journal app. The current app version appears at the botto
 
 ## 0.5.0 (2026-11-19)
 
-- Tags! Add them to a work from the Tags box on its page: start typing and pick a suggestion, or press Enter to create a new tag. Suggestions find other names for a tag (typing "yaoi" finds Boys' Love), forgive typos, and suggest tags you often use together.
-- Click a tag on a work to choose its category, mark it as a content warning, or note why it applies to that work.
+- Tags! Works can be tagged from the Tags box on their page, by picking a suggestion or creating a new tag with Enter. Suggestions include other names for a tag (typing "yaoi" finds Boys' Love), allow for typos, and offer tags often used together.
+- Work pages: clicking a tag sets its category, marks it as a content warning, or adds a note on why it applies to that work.
 - Content warnings are listed separately from the other tags on a work's page.
 - New Tags page, linked at the top: every tag grouped by category, with each category's description. Categories can be renamed, recolored, described, added, deleted and dragged into a new order.
 - Each tag has its own page with its description, other names, the works that use it, and a link to show them in the library.
 - The library can show just the works with one tag.
-- The journal comes with a starter set of about 230 tags in nine categories, with names familiar from Goodreads, AO3, AniList and MangaUpdates. Your journal is updated to add them the first time you start this version, after saving a backup.
+- New journals come with a starter set of about 230 tags in nine categories, using names familiar from Goodreads, AO3, AniList and MangaUpdates. Existing journals get them on upgrade.
 
 ## 0.4.0 (2026-11-10)
 

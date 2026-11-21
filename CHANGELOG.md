@@ -3,6 +3,8 @@ Updates to the Reading Journal app. The current app version appears at the botto
 
 ## Unreleased
 
+## 0.6.0 (2026-11-21)
+
 - Tag pages: aliases can be added and removed in Edit Tag. Typing an alias anywhere finds its tag.
 - Tag pages: adding an alias that is already a tag of its own offers to merge the two. Works, aliases and the tags inside move over, and a content warning carries across. Merged works keep showing the name they had.
 - Work pages: a tag added by an alias shows both names, like "M/M (Boys' Love)". Its pop-up links to the works tagged with that alias.

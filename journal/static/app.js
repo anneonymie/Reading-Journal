@@ -309,16 +309,17 @@
       const li = document.createElement("li");
       li.setAttribute("role", "option");
       li.id = `${list.id}-${i}`;
-      li.dataset.name = s.name;
+      // An alias match adds the tag by that alias, so the work shows e.g. "M/M (Boys' Love)".
+      li.dataset.name = s.alias || s.name;
       const dot = document.createElement("span");
       dot.className = "swatch";
       dot.style.setProperty("--cat", s.color);
       const name = document.createElement("span");
-      name.textContent = s.name;
+      name.textContent = s.alias || s.name;
       const why = document.createElement("span");
       why.className = "why";
-      why.textContent = s.on_work ? "already on this work" : s.alias ? `also called ${s.alias}`
-        : s.similar_to ? `often with ${s.similar_to}` : s.category;
+      why.textContent = s.on_work ? "already on this work" : s.alias ? `aka ${s.name}`
+        : s.parent_of ? `parent of ${s.parent_of}` : s.similar_to ? `often with ${s.similar_to}` : s.category;
       if (s.on_work) li.dataset.onWork = "1";
       li.append(dot, name, why);
       list.appendChild(li);
@@ -363,6 +364,23 @@
   });
   document.addEventListener("focusout", (e) => {
     if (e.target.matches?.("[data-tag-input]")) closeSuggestions(e.target);
+  });
+
+  // Tag page: putting a tag inside a CW tag asks whether to make it a CW too. Nothing is inherited.
+  document.querySelectorAll("form[data-tag-form]").forEach((form) => {
+    const parent = form.querySelector("[data-parent-input]");
+    const cw = form.querySelector('input[name="cw"]');
+    const before = parent.value.trim().toLowerCase();
+    form.addEventListener("submit", (e) => {
+      if (e.submitter && e.submitter.hasAttribute("formaction")) return;   // Delete tag
+      const name = parent.value.trim();
+      if (!name || name.toLowerCase() === before || cw.checked) return;
+      const isCw = Array.from(form.querySelectorAll("#parent-choices option[data-cw]"))
+        .some((o) => o.value.toLowerCase() === name.toLowerCase());
+      if (isCw && window.confirm(`${name} is a content warning. Mark ${form.dataset.tagName} as a content warning too?`)) {
+        cw.checked = true;
+      }
+    });
   });
 
   // Tags page: drag categories into order; the new order saves straight away.

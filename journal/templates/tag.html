@@ -16,12 +16,23 @@
       </p>
       {% if tag.description_md %}<div class="prose">{{ tag.description_md|md }}</div>{% else %}<p class="hint">No description yet.</p>{% endif %}
       <dl class="facts tag-facts">
-        {% if aliases %}<dt>Also called</dt><dd>{{ aliases|join(", ") }}</dd>{% endif %}
+        {% if aliases %}<dt>Aliases</dt><dd>{% for a in aliases %}<a href="{{ url_for('journal.library', alias=a) }}" title="Works tagged {{ a }}">{{ a }}</a>{{ ", " if not loop.last }}{% endfor %}</dd>{% endif %}
         {% if parent %}<dt>Inside</dt><dd>{{ tag_chip(parent) }}</dd>{% endif %}
         {% if children %}<dt>Contains</dt><dd><ul class="chips">{% for ch in children %}<li>{{ tag_chip(ch) }}</li>{% endfor %}</ul></dd>{% endif %}
       </dl>
+      {% if tag.is_cw and not_cw_inside %}
+      {% set n = not_cw_inside|length %}
+      <form method="post" action="{{ url_for('journal.tag_cw_children', tag_id=tag.id) }}" class="cw-children"
+            data-confirm="Mark {{ n }} {{ 'tag' if n == 1 else 'tags' }} inside {{ tag.name }} as content warnings?
+
+{{ not_cw_inside[:10]|join(', ') }}{% if n > 10 %}, and {{ n - 10 }} more{% endif %}">
+        <button type="submit" class="secondary small">Apply CW to all its children</button>
+        <span class="hint">{{ n }} {{ 'tag' if n == 1 else 'tags' }} inside it {{ 'isn’t a content warning' if n == 1 else 'aren’t content warnings' }} yet.</span>
+      </form>
+      {% endif %}
     </div>
-    <form method="post" action="{{ url_for('journal.tag_update', tag_id=tag.id) }}" class="stack" data-form hidden>
+    <form method="post" action="{{ url_for('journal.tag_update', tag_id=tag.id) }}" class="stack" data-form hidden
+          data-tag-form data-tag-name="{{ tag.name }}">
       <label class="field"><span>Name</span><input name="name" value="{{ tag.name }}" maxlength="100" required></label>
       <div class="row">
         <label class="field">
@@ -31,8 +42,25 @@
             {% for c in categories %}<option value="{{ c.id }}" {% if c.id == tag.category_id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
           </select>
         </label>
+        <label class="field">
+          <span>Inside</span>
+          <input name="parent" value="{{ parent.name if parent else '' }}" maxlength="100" autocomplete="off"
+                 list="parent-choices" placeholder="No parent tag" data-parent-input>
+        </label>
+        <datalist id="parent-choices">
+          {% for p in parent_choices %}<option value="{{ p.name }}"{% if p.is_cw %} data-cw{% endif %}></option>{% endfor %}
+        </datalist>
       </div>
       <label class="check"><input type="checkbox" name="cw" value="1" {% if tag.is_cw %}checked{% endif %}> Content warning</label>
+      <div class="field repeat" data-repeat="+ Add another alias">
+        <span>Aliases</span>
+        <p class="hint">Typing an alias finds this tag. A name that's already a tag of its own can be merged into this one.</p>
+        {% for a in aliases or [""] %}
+        <div class="text-row" data-repeat-row>
+          <input name="alias" value="{{ a }}" maxlength="100" autocomplete="off" placeholder="Also known as" aria-label="Alias {{ loop.index }}">
+        </div>
+        {% endfor %}
+      </div>
       <label class="field">
         <span>Description</span>
         <textarea name="description_md" rows="4" data-ctrl-enter>{{ tag.description_md or "" }}</textarea>
@@ -49,7 +77,7 @@
   <section class="tag-works-section">
     <div class="category-head">
       <h2>Works <span class="count">{{ works|length }}</span></h2>
-      {% if works %}<a href="{{ url_for('journal.library', tag=tag.id) }}">Show in library</a>{% endif %}
+      {% if library_count %}<a href="{{ url_for('journal.library', tag=tag.id) }}">Show in library{% if children %}, with the tags inside it ({{ library_count }}){% endif %}</a>{% endif %}
     </div>
     {% if works %}
     <ul class="tag-works">
@@ -58,7 +86,7 @@
         <a href="{{ url_for('journal.work_page', work_id=w.id) }}">{{ cover(w.cover_path, w.title, "cover small") }}</a>
         <div>
           <a class="tag-work-title" href="{{ url_for('journal.work_page', work_id=w.id) }}#tags">{{ w.title }}</a>
-          <span class="book-meta">{{ w.format_label }}</span>
+          <span class="book-meta">{{ w.format_label }}{% if w.alias %}, tagged {{ w.alias }}{% endif %}</span>
           {% if w.justification_md %}<div class="prose">{{ w.justification_md|md }}</div>{% endif %}
         </div>
       </li>

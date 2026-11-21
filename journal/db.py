@@ -10,7 +10,7 @@ from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
 STARTER_TAGS_PATH = Path(__file__).resolve().parent / "starter_tags.json"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 MIN_SQLITE = (3, 43, 0)
 
 
@@ -56,14 +56,58 @@ def _v4_to_v5(conn):
     conn.execute("ALTER TABLE tag DROP COLUMN category")
 
 
-def load_starter_tags(conn):
-    """Add the starter categories and tags from starter_tags.json.
+def _v5_to_v6(conn):
+    # A parent tag's CW no longer passes to the tags inside it: only a tag's own CW counts.
+    conn.execute("DROP VIEW image_cw")
+    conn.execute("DROP VIEW work_cw")
+    conn.execute("""CREATE VIEW image_cw AS
+                    SELECT it.image_id, MAX(cs.blur) AS blur, MAX(cs.badge) AS badge,
+                           group_concat(DISTINCT t.name) AS cw_tags
+                    FROM image_tag it
+                    JOIN cw_setting cs ON cs.tag_id = it.tag_id
+                    JOIN tag t         ON t.id = it.tag_id
+                    GROUP BY it.image_id""")
+    conn.execute("""CREATE VIEW work_cw AS
+                    SELECT wt.work_id, MAX(cs.blur) AS blur, MAX(cs.badge) AS badge,
+                           group_concat(DISTINCT t.name) AS cw_tags
+                    FROM work_tag wt
+                    JOIN cw_setting cs ON cs.tag_id = wt.tag_id
+                    JOIN tag t         ON t.id = wt.tag_id
+                    GROUP BY wt.work_id""")
+
+
+def _v6_to_v7(conn):
+    # Each work's tag remembers the alias it was added by, so 'M/M' shows as "M/M (Boys' Love)".
+    conn.execute("""ALTER TABLE work_tag ADD COLUMN
+                    alias TEXT COLLATE NOCASE REFERENCES tag_alias(alias) ON DELETE SET NULL ON UPDATE CASCADE""")
+    conn.execute("CREATE INDEX work_tag_alias ON work_tag(alias)")
+    for when, event in (("ins", "INSERT"), ("upd", "UPDATE OF alias, tag_id")):
+        conn.execute(f"""CREATE TRIGGER work_tag_alias_matches_{when}
+                         BEFORE {event} ON work_tag
+                         WHEN NEW.alias IS NOT NULL
+                          AND NOT EXISTS (SELECT 1 FROM tag_alias WHERE alias = NEW.alias AND tag_id = NEW.tag_id)
+                         BEGIN
+                             SELECT RAISE(ABORT, 'that alias belongs to a different tag');
+                         END""")
+    conn.execute("""CREATE TRIGGER tag_alias_moved
+                    AFTER UPDATE OF tag_id ON tag_alias
+                    BEGIN
+                        UPDATE work_tag SET alias = NULL WHERE alias = NEW.alias AND tag_id <> NEW.tag_id;
+                    END""")
+    # New starter category: the language a work was first published in.
+    load_starter_tags(conn, only={"Original Language"})
+
+
+def load_starter_tags(conn, only=None):
+    """Add the starter categories and tags from starter_tags.json (or just the categories named in `only`).
 
     Anything that already exists by name is left as it is, except that an uncategorized
     tag gets its starter category and a starter CW is marked. Aliases that would clash
     with an existing name, and nesting that would loop, are skipped.
     """
     data = json.loads(STARTER_TAGS_PATH.read_text(encoding="utf-8"))
+    if only is not None:
+        data["categories"] = [cat for cat in data["categories"] if cat["name"] in only]
     one = lambda sql, args: conn.execute(sql, args).fetchone()
     position = one("SELECT coalesce(max(position) + 1, 0) FROM tag_category", ())[0]
     for cat in data["categories"]:
@@ -101,7 +145,7 @@ def load_starter_tags(conn):
 # All steps run in one transaction, so they must use conn.execute(), never
 # conn.executescript(), which commits part-way through.
 # old_schemas/ keeps each earlier schema.sql so tests can upgrade a real old database.
-MIGRATIONS = {2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5}
+MIGRATIONS = {2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7}
 
 
 class SetupError(RuntimeError):

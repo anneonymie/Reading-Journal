@@ -688,6 +688,36 @@ def test_add_tags_to_work():
     assert work_tag_names(a, wid) == ["Boys' Love", "Horror", "Tiny Dragons"]
     assert a.one("SELECT category_id FROM tag WHERE name = 'Tiny Dragons'") is None   # new tags start uncategorized
     assert a.one("SELECT COUNT(*) FROM tag WHERE name IN ('yaoi', 'horror')") == 1     # only Horror itself
+    assert a.one("SELECT alias FROM work_tag WHERE tag_id = ?", (tag_id(a, "Boys' Love"),)) == "Yaoi"   # remembers how
+    assert a.one("SELECT alias FROM work_tag WHERE tag_id = ?", (tag_id(a, "Horror"),)) is None
+
+def test_tag_added_by_alias():
+    a = App()
+    by_alias, by_name = a.add_work(title="By Alias"), a.add_work(title="By Name")
+    a.client.post(f"/works/{by_alias}/tags", data={"name": "yaoi"})
+    a.client.post(f"/works/{by_name}/tags", data={"name": "boys' love"})
+    bl = tag_id(a, "Boys' Love")
+    box = lambda w: a.client.get(f"/works/{w}").get_data(as_text=True).split('id="tags"')[1].split("</section>")[0]
+    assert 'Yaoi <span class="alias-of">(Boys&#39; Love)</span>' in box(by_alias)   # "Yaoi (Boys' Love)"
+    assert 'href="/?alias=Yaoi"' in box(by_alias)
+    assert ">Boys&#39; Love" in box(by_name) and "alias-of" not in box(by_name)
+    # the tag page says which works were tagged by an alias, and each alias opens its own works
+    page = a.client.get(f"/tags/{bl}").get_data(as_text=True)
+    assert "tagged Yaoi" in page and 'href="/?alias=Yaoi"' in page
+    # filtering by the tag finds both; by the alias, just the one tagged that way
+    a.client.get("/")
+    lib = a.client.get(f"/?tag={bl}").get_data(as_text=True)
+    assert "By Alias" in lib and "By Name" in lib
+    lib = a.client.get("/?alias=YAOI").get_data(as_text=True)
+    assert "By Alias" in lib and "By Name" not in lib and "Tagged Yaoi (" in lib
+    assert 'href="/?status=reading&amp;alias=Yaoi"' in lib and 'All <span class="count">1</span>' in lib
+    assert "By Name" in a.client.get("/?alias=nothing-like-this").get_data(as_text=True)   # unknown: no filter
+    # changing an alias's capitals keeps it on the work; removing it shows just the tag
+    aliases = tag_aliases(a, bl)
+    edit_tag(a, bl, alias=[x if x != "Yaoi" else "YAOI" for x in aliases])
+    assert 'YAOI <span class="alias-of">' in box(by_alias)
+    edit_tag(a, bl, alias=[x for x in aliases if x != "Yaoi"])
+    assert "alias-of" not in box(by_alias) and work_tag_names(a, by_alias) == ["Boys' Love"]
 
 def test_tag_box_comes_back_on_its_own_for_the_script():
     a = App()
@@ -769,13 +799,17 @@ def test_tag_suggestions():
     assert found[0]["name"] == "Slow Burn"
     assert {"name": "Mutual Pining", "similar_to": "Slow Burn"}.items() <= next(
         s for s in found if s["name"] == "Mutual Pining").items()
+    # a child tag's parent comes straight after it
+    found = suggestions(a, "otome isekai")
+    assert [s["name"] for s in found[:2]] == ["Otome Isekai", "Isekai"] and found[1]["parent_of"] == "Otome Isekai"
 
 def test_tags_page():
     a = App()
     page = a.client.get("/tags").get_data(as_text=True)
     assert "<h1>Tags</h1>" in page
     heads = re.findall(r'<h2><span class="swatch" aria-hidden="true"></span>([^<]+?) <span', page)
-    assert heads == ["Genre", "Audience", "Relationships", "Mood", "Themes", "Plot", "Characters", "Setting", "Form"]
+    assert heads == ["Genre", "Audience", "Relationships", "Mood", "Themes", "Plot", "Characters", "Setting", "Form",
+                     "Original Language"]
     assert "<p>What happens: the premise and the hooks.</p>" in page   # each category's description
     assert 'id="uncategorized"' not in page   # no Uncategorized section until a tag needs one
     wid = a.add_work()
@@ -839,6 +873,162 @@ def test_tag_page_edit_rename_and_delete():
     a.client.post(f"/tags/{tid}/delete")
     assert a.one("SELECT COUNT(*) FROM tag WHERE id = ?", (tid,)) == 0 and work_tag_names(a, wid) == []
     assert a.client.get(f"/tags/{tid}").status_code == 404
+
+def edit_tag(a, tid, **fields):
+    """Post the tag page's Edit form, keeping the current name and category unless given."""
+    data = {"name": a.one("SELECT name FROM tag WHERE id = ?", (tid,)),
+            "category": str(a.one("SELECT category_id FROM tag WHERE id = ?", (tid,)) or "")}
+    data.update(fields)
+    return a.client.post(f"/tags/{tid}", data=data)
+
+def tag_aliases(a, tid):
+    conn = a.db()
+    try:
+        return sorted(r[0] for r in conn.execute("SELECT alias FROM tag_alias WHERE tag_id = ?", (tid,)))
+    finally:
+        conn.close()
+
+def test_tag_other_names():
+    a = App()
+    a.client.post("/tags", data={"name": "Weird Little Guys"})
+    tid = tag_id(a, "Weird Little Guys")
+    page = a.client.get(f"/tags/{tid}").get_data(as_text=True)
+    assert 'name="alias"' in page and 'data-repeat="+ Add another alias"' in page
+    # tidied; blanks, repeats and the tag's own name are skipped
+    edit_tag(a, tid, alias=["  Odd   Fellows ", "", "odd fellows", "weird little guys", "Gremlins"])
+    assert tag_aliases(a, tid) == ["Gremlins", "Odd Fellows"]
+    assert suggestions(a, "gremlins")[0]["name"] == "Weird Little Guys"   # an alias finds its tag
+    # leaving one out removes it; another tag's alias is refused
+    r = a.client.post(f"/tags/{tid}", data={"name": "Weird Little Guys", "alias": ["Gremlins", "yaoi"]},
+                      follow_redirects=True)
+    assert "“yaoi” is already an alias of Boys&#39; Love" in r.get_data(as_text=True)
+    assert tag_aliases(a, tid) == ["Gremlins"] and a.one("SELECT t.name FROM tag_alias a JOIN tag t ON t.id = a.tag_id WHERE alias = 'yaoi'") == "Boys' Love"
+    # a form without the boxes leaves aliass alone
+    edit_tag(a, tid)
+    assert tag_aliases(a, tid) == ["Gremlins"]
+
+def test_tag_parent():
+    a = App()
+    for name in ("Grandparent", "Parent", "Child"):
+        a.client.post("/tags", data={"name": name})
+    gp, p, ch = (tag_id(a, n) for n in ("Grandparent", "Parent", "Child"))
+    edit_tag(a, p, parent="grandparent")                       # by name, whatever the capitals
+    edit_tag(a, ch, parent="Parent")
+    assert a.one("SELECT parent_id FROM tag WHERE id = ?", (ch,)) == p and a.one("SELECT parent_id FROM tag WHERE id = ?", (p,)) == gp
+    a.client.post(f"/tags/{ch}", data={"name": "Child", "alias": ["Kiddo"]})
+    edit_tag(a, a.one("SELECT id FROM tag WHERE name = 'Romance'"), parent="kiddo")   # by alias
+    assert a.one("SELECT parent_id FROM tag WHERE name = 'Romance'") == ch
+    # the tag page offers every tag but itself and those inside it
+    choices = re.findall(r'<option value="([^"]+)"', a.client.get(f"/tags/{p}").get_data(as_text=True).split('id="parent-choices"')[1].split("</datalist>")[0])
+    assert "Grandparent" in choices and "Parent" not in choices and "Child" not in choices and "Romance" not in choices
+    assert 'value="Horror" data-cw' in a.client.get(f"/tags/{p}").get_data(as_text=True)   # CWs marked, for the question
+    # a loop or an unknown name changes nothing, and says why
+    r = edit_tag(a, gp, parent="Child")
+    assert a.one("SELECT parent_id FROM tag WHERE id = ?", (gp,)) is None
+    assert "can&#39;t go inside itself or a tag inside it" in a.client.get(r.headers["Location"]).get_data(as_text=True)
+    r = edit_tag(a, ch, parent="Nope Not A Tag")
+    assert a.one("SELECT parent_id FROM tag WHERE id = ?", (ch,)) == p
+    assert "no tag called “Nope Not A Tag”" in a.client.get(r.headers["Location"]).get_data(as_text=True)
+    # blank takes it out
+    edit_tag(a, ch, parent="")
+    assert a.one("SELECT parent_id FROM tag WHERE id = ?", (ch,)) is None
+
+def test_merge_tags():
+    a = App()
+    one, two = a.add_work(title="One"), a.add_work(title="Two")
+    a.client.post(f"/works/{one}/tags", data={"name": "BL Stuff"})
+    a.client.post(f"/works/{two}/tags", data={"name": "BL Stuff"})
+    a.client.post(f"/works/{two}/tags", data={"name": "Boys' Love"})
+    bl, other = tag_id(a, "Boys' Love"), tag_id(a, "BL Stuff")
+    a.client.post(f"/works/{one}/tags/{other}", data={"category": "", "cw": "1", "reason": "the kiss"})
+    a.client.post(f"/tags/{other}", data={"name": "BL Stuff", "cw": "1", "description_md": "Mine", "alias": ["Boy Stuff"]})
+    a.client.post("/tags", data={"name": "Office BL"})
+    edit_tag(a, tag_id(a, "Office BL"), parent="BL Stuff")
+    before = tag_aliases(a, bl)
+    # naming it as an alias saves the rest, then asks first
+    r = a.client.post(f"/tags/{bl}", data={"name": "Boys' Love", "category": "", "alias": before + ["bl stuff"]})
+    assert r.headers["Location"].endswith(f"/tags/{bl}/merge?other={other}")
+    assert a.one("SELECT category_id FROM tag WHERE id = ?", (bl,)) is None and tag_id(a, "BL Stuff") == other
+    page = a.client.get(r.headers["Location"]).get_data(as_text=True)
+    assert "Merge into Boys&#39; Love?" in page and ">BL Stuff</a>" in page
+    assert "2 works, 1 tag inside it, aliases: Boy Stuff, content warning" in " ".join(page.split())
+    r = a.client.post(f"/tags/{bl}/merge", data={"other": [str(other)]}, follow_redirects=True)
+    assert "Merged BL Stuff into Boys&#39; Love." in r.get_data(as_text=True)
+    assert a.one("SELECT COUNT(*) FROM tag WHERE id = ?", (other,)) == 0
+    assert work_tag_names(a, one) == ["Boys' Love"] and work_tag_names(a, two) == ["Boys' Love"]   # no doubles
+    assert a.one("SELECT justification_md FROM work_tag WHERE work_id = ? AND tag_id = ?", (one, bl)) == "the kiss"
+    assert tag_aliases(a, bl) == sorted(before + ["BL Stuff", "Boy Stuff"])
+    assert a.one("SELECT parent_id FROM tag WHERE name = 'Office BL'") == bl
+    assert a.one("SELECT COUNT(*) FROM cw_setting WHERE tag_id = ?", (bl,)) == 1   # either was a CW
+    assert a.one("SELECT description_md FROM tag WHERE id = ?", (bl,)) == "Mine"  # filled in, since it had none
+    # works keep showing the name they were tagged with; one that had both keeps the target's
+    assert a.one("SELECT alias FROM work_tag WHERE work_id = ? AND tag_id = ?", (one, bl)) == "BL Stuff"
+    assert a.one("SELECT alias FROM work_tag WHERE work_id = ? AND tag_id = ?", (two, bl)) is None
+    assert 'BL Stuff <span class="alias-of">(Boys&#39; Love)</span>' in a.client.get(f"/works/{one}").get_data(as_text=True)
+
+def test_merge_tag_that_contains_the_target():
+    a = App()
+    for name in ("Top", "Middle", "Bottom", "Side"):
+        a.client.post("/tags", data={"name": name})
+    top, mid, bottom, side = (tag_id(a, n) for n in ("Top", "Middle", "Bottom", "Side"))
+    edit_tag(a, mid, parent="Top")
+    edit_tag(a, bottom, parent="Middle")
+    edit_tag(a, side, parent="Top")
+    # merging Top into Bottom: Middle (which Bottom is inside) moves up rather than loop; Side moves under Bottom
+    a.client.post(f"/tags/{bottom}/merge", data={"other": [str(top)]})
+    assert a.one("SELECT parent_id FROM tag WHERE id = ?", (mid,)) is None
+    assert a.one("SELECT parent_id FROM tag WHERE id = ?", (bottom,)) == mid
+    assert a.one("SELECT parent_id FROM tag WHERE id = ?", (side,)) == bottom
+    # merging a tag into the one inside it: the target takes its place
+    a.client.post(f"/tags/{bottom}/merge", data={"other": [str(mid)]})
+    assert a.one("SELECT parent_id FROM tag WHERE id = ?", (bottom,)) is None and tag_aliases(a, bottom) == ["Middle", "Top"]
+    # nothing to merge (itself, or unknown) just goes back
+    r = a.client.get(f"/tags/{bottom}/merge?other={bottom}&other=999")
+    assert r.status_code == 302 and r.headers["Location"].endswith(f"/tags/{bottom}")
+
+def test_apply_cw_to_children():
+    a = App()
+    names = ["Parent CW"] + [f"Kid {i:02}" for i in range(12)] + ["Grandkid"]
+    for name in names:
+        a.client.post("/tags", data={"name": name})
+    parent = tag_id(a, "Parent CW")
+    for i in range(12):
+        edit_tag(a, tag_id(a, f"Kid {i:02}"), parent="Parent CW")
+    edit_tag(a, tag_id(a, "Grandkid"), parent="Kid 00")
+    a.client.post(f"/tags/{tag_id(a, 'Kid 05')}", data={"name": "Kid 05", "cw": "1"})
+    assert "Apply CW to all its children" not in a.client.get(f"/tags/{parent}").get_data(as_text=True)   # not a CW itself
+    edit_tag(a, parent, cw="1")
+    kids_cw = "SELECT COUNT(*) FROM cw_setting WHERE tag_id IN (SELECT id FROM tag WHERE name GLOB 'Kid [0-9]*' OR name = 'Grandkid')"
+    assert a.one(kids_cw) == 1   # nothing inherited
+    page = a.client.get(f"/tags/{parent}").get_data(as_text=True)
+    confirm = re.search(r'class="cw-children"\s+data-confirm="([^"]*)"', page).group(1)
+    assert confirm.startswith("Mark 12 tags inside Parent CW as content warnings?")   # Kid 05 already is
+    assert "Grandkid, Kid 00, Kid 01" in confirm and "Kid 09, and 2 more" in confirm   # first 10, then how many more
+    r = a.client.post(f"/tags/{parent}/cw-children", follow_redirects=True)
+    assert "Marked 12 tags inside Parent CW as content warnings." in r.get_data(as_text=True)
+    assert a.one(kids_cw) == 13
+    assert "Apply CW to all its children" not in a.client.get(f"/tags/{parent}").get_data(as_text=True)   # nothing left to do
+    # a tag that isn't a CW can't hand one down
+    plain = tag_id(a, "Isekai")
+    a.client.post(f"/tags/{plain}/cw-children")
+    assert a.one("SELECT COUNT(*) FROM cw_setting WHERE tag_id = ?", (tag_id(a, "Otome Isekai"),)) == 0
+
+def test_library_filter_includes_tags_inside():
+    a = App()
+    for name in ("Outer", "Inner", "Innermost"):
+        a.client.post("/tags", data={"name": name})
+    edit_tag(a, tag_id(a, "Inner"), parent="Outer")
+    edit_tag(a, tag_id(a, "Innermost"), parent="Inner")
+    deep = a.add_work(title="Deep One")
+    a.add_work(title="Untagged One")
+    a.client.post(f"/works/{deep}/tags", data={"name": "Innermost"})
+    a.client.get("/")   # clears the "Added..." messages
+    outer = tag_id(a, "Outer")
+    page = a.client.get(f"/?tag={outer}").get_data(as_text=True)
+    assert "Deep One" in page and "Untagged One" not in page and "or a tag inside it" in page
+    assert 'All <span class="count">1</span>' in page
+    tag_page = a.client.get(f"/tags/{outer}").get_data(as_text=True)
+    assert "Show in library, with the tags inside it (1)" in tag_page and "No works have this tag yet" in tag_page
 
 def test_find_or_create_tag_from_tags_page():
     a = App()
@@ -1289,10 +1479,70 @@ def test_upgrade_from_v4_journal_adds_tag_categories():
         conn.close()
         new_conn.close()
 
+def test_upgrade_from_v5_journal_stops_cw_inheritance():
+    def old_data(conn):
+        conn.execute("INSERT INTO work(id, title, format_code) VALUES (1, 'One', 'manga')")
+        conn.execute("INSERT INTO tag(id, name, parent_id) VALUES (900, 'My Gore', (SELECT id FROM tag WHERE name = 'Violence'))")
+        conn.execute("INSERT INTO work_tag(work_id, tag_id) VALUES (1, 900)")
+        conn.execute("INSERT INTO tag(id, name) VALUES (901, 'Boys'' Love')")
+        conn.execute("INSERT INTO tag_alias(alias, tag_id) VALUES ('Yaoi', 901)")
+        assert conn.execute("SELECT COUNT(*) FROM work_cw").fetchone()[0] == 1   # inherited before
+    a = App(old_schema="schema_v5.sql", before=old_data)
+    assert a.one("PRAGMA user_version") == V and len(backups(a)) == 1
+    assert a.one("SELECT COUNT(*) FROM work_cw") == 0 and a.one("SELECT parent_id FROM tag WHERE id = 900")
+    a.client.post("/works/1/tags", data={"name": "Violence"})
+    assert a.one("SELECT cw_tags FROM work_cw WHERE work_id = 1") == "Violence"
+    # tags remember the alias they were added by, and the Original Language tags arrived
+    a.client.post("/works/1/tags", data={"name": "yaoi"})
+    assert a.one("SELECT alias FROM work_tag WHERE work_id = 1 AND tag_id = (SELECT id FROM tag WHERE name = 'Boys'' Love')") == "Yaoi"
+    assert a.one("SELECT COUNT(*) FROM tag t JOIN tag_category c ON c.id = t.category_id WHERE c.name = 'Original Language'") == 4
+    columns = "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('work_tag')"
+    # same tables, views and triggers as a brand-new journal, and the views say the same thing
+    objects = "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY 1, 2"
+    view = "SELECT sql FROM sqlite_master WHERE name = ?"
+    squash = lambda sql: re.sub(r"\s+", "", sql)   # spacing aside
+    fresh = App()
+    conn, new_conn = a.db(), fresh.db()
+    try:
+        assert conn.execute(objects).fetchall() == new_conn.execute(objects).fetchall()
+        assert conn.execute(columns).fetchall() == new_conn.execute(columns).fetchall()
+        for name in ("image_cw", "work_cw"):
+            assert squash(conn.execute(view, (name,)).fetchone()[0]) == squash(new_conn.execute(view, (name,)).fetchone()[0]), name
+    finally:
+        conn.close()
+        new_conn.close()
+
+def test_upgrade_from_v6_journal_adds_alias_on_works():
+    def old_data(conn):
+        conn.execute("INSERT INTO work(id, title, format_code) VALUES (1, 'One', 'manga')")
+        conn.execute("INSERT INTO tag(id, name) VALUES (901, 'Boys'' Love')")
+        conn.execute("INSERT INTO tag_alias(alias, tag_id) VALUES ('Yaoi', 901)")
+        conn.execute("INSERT INTO work_tag(work_id, tag_id, justification_md) VALUES (1, 901, 'why')")
+    a = App(old_schema="schema_v6.sql", before=old_data)
+    assert a.one("PRAGMA user_version") == V and len(backups(a)) == 1
+    r = a.client.get("/works/1")
+    assert r.status_code == 200 and ">Boys&#39; Love" in r.get_data(as_text=True)   # the page that failed before
+    assert a.one("SELECT justification_md FROM work_tag WHERE tag_id = 901") == "why" and a.one("SELECT alias FROM work_tag") is None
+    a.client.post("/works/1/tags/901/remove")
+    a.client.post("/works/1/tags", data={"name": "yaoi"})
+    assert a.one("SELECT alias FROM work_tag WHERE work_id = 1") == "Yaoi"
+    assert a.one("SELECT COUNT(*) FROM tag t JOIN tag_category c ON c.id = t.category_id WHERE c.name = 'Original Language'") == 4
+    objects = "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY 1, 2"
+    columns = "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('work_tag')"
+    fresh = App()
+    conn, new_conn = a.db(), fresh.db()
+    try:
+        assert conn.execute(objects).fetchall() == new_conn.execute(objects).fetchall()
+        assert conn.execute(columns).fetchall() == new_conn.execute(columns).fetchall()
+    finally:
+        conn.close()
+        new_conn.close()
+
 def test_starter_tags_in_new_journal():
     a = App()
     cats = a.one("SELECT group_concat(name, ', ') FROM (SELECT name FROM tag_category ORDER BY position)")
-    assert cats == "Genre, Audience, Relationships, Mood, Themes, Plot, Characters, Setting, Form"
+    assert cats == "Genre, Audience, Relationships, Mood, Themes, Plot, Characters, Setting, Form, Original Language"
+    assert a.one("SELECT group_concat(name, ', ') FROM (SELECT t.name FROM tag t JOIN tag_category c ON c.id = t.category_id WHERE c.name = 'Original Language' ORDER BY t.id)") == "Japanese, Chinese, Korean, English"
     assert a.one("SELECT description_md FROM tag_category WHERE name = 'Plot'") == "What happens: the premise and the hooks."
     tag = lambda name: a.one("""SELECT c.name || '|' || (t.id IN (SELECT tag_id FROM cw_setting))
                                 FROM tag t JOIN tag_category c ON c.id = t.category_id WHERE t.name = ?""", (name,))

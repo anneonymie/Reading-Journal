@@ -189,11 +189,18 @@ def library():
     valid = {r["code"] for r in c.execute("SELECT code FROM status")}
     if status not in valid:
         status = None
-    tag = None
-    if request.args.get("tag", "").isdigit():
+    # Filter by a tag (with the tags inside it), or by one alias: only works added by that alias.
+    tag, alias, tagged, args, keep = None, None, "1", (), {}
+    found = find_alias(clean_tag_name(request.args.get("alias"))) if request.args.get("alias") else None
+    if found:
+        alias = found["alias"]
+        tag = c.execute(f"{TAG_SELECT} WHERE t.id = ?", (found["tag_id"],)).fetchone()
+        tagged, args, keep = "w.id IN (SELECT work_id FROM work_tag WHERE alias = ?)", (alias,), {"alias": alias}
+    elif request.args.get("tag", "").isdigit():
         tag = c.execute(f"{TAG_SELECT} WHERE t.id = ?", (int(request.args["tag"]),)).fetchone()
-    tag_id = tag["id"] if tag else None
-    tagged = "(? IS NULL OR w.id IN (SELECT work_id FROM work_tag WHERE tag_id = ?))"
+        if tag:
+            tagged, args, keep = TAGGED_OR_INSIDE, (tag["id"],), {"tag": tag["id"]}
+    has_inside = bool(tag and not alias and c.execute("SELECT 1 FROM tag WHERE parent_id = ?", (tag["id"],)).fetchone())
     works = c.execute(
         """SELECT w.id, w.title, f.label AS format_label, i.file_path AS cover_path,
                   cs.status_code, s.label AS status_label, w.progress_current, w.length_total,
@@ -208,15 +215,15 @@ def library():
            LEFT JOIN status s ON s.code = cs.status_code
            WHERE (? IS NULL OR cs.status_code = ?) AND {tagged}
            ORDER BY last_active DESC, w.id DESC""".replace("{tagged}", tagged),
-        (status, status, tag_id, tag_id),
+        (status, status, *args),
     ).fetchall()
     # The status counts follow the tag filter, so they match what each tab shows.
     counts = {r["status_code"]: r["n"] for r in c.execute(
         f"""SELECT cs.status_code, COUNT(*) AS n FROM work_current_status cs JOIN work w ON w.id = cs.work_id
-            WHERE {tagged} GROUP BY cs.status_code""", (tag_id, tag_id))}
-    total = c.execute(f"SELECT COUNT(*) FROM work w WHERE {tagged}", (tag_id, tag_id)).fetchone()[0]
-    return render_template("library.html", works=works, status=status, counts=counts,
-                           total=total, tag=tag, **lookups())
+            WHERE {tagged} GROUP BY cs.status_code""", args)}
+    total = c.execute(f"SELECT COUNT(*) FROM work w WHERE {tagged}", args).fetchone()[0]
+    return render_template("library.html", works=works, status=status, counts=counts, total=total,
+                           tag=tag, alias=alias, keep=keep, has_inside=has_inside, **lookups())
 
 
 # ------------------------------------------------------------------ add / edit works
@@ -486,7 +493,8 @@ def render_work(work_id, composer=None, errors=None, status=200):
     return render_template("work.html", work=work, alt_titles=alt_titles, creators=creators,
                            publishers=work_publishers(work_id), work_sources=work_sources(work_id),
                            entries=entries, images=images,
-                           tags=work_tags(work_id), reasons=work_tag_reasons(work_id), categories=categories(),
+                           tags=work_tags(work_id), reasons=work_tag_reasons(work_id),
+                           shown_as=work_tag_aliases(work_id), categories=categories(),
                            completions=completions["completions"] if completions else 0,
                            composer=composer, errors=errors or [], **lookups()), status
 
@@ -722,6 +730,9 @@ TAG_SELECT = """SELECT t.id, t.name, t.description_md, t.category_id, t.parent_i
                        EXISTS (SELECT 1 FROM cw_setting WHERE tag_id = t.id) AS is_cw
                 FROM tag t LEFT JOIN tag_category c ON c.id = t.category_id"""
 CATEGORY_ORDER = "c.position IS NULL, c.position, t.name COLLATE NOCASE"   # uncategorized last
+# Works with the tag ? itself or any tag inside it, at any depth (for the library filter).
+TAGGED_OR_INSIDE = """w.id IN (SELECT wt.work_id FROM work_tag wt
+                               JOIN tag_ancestor ta ON ta.tag_id = wt.tag_id WHERE ta.ancestor_id = ?)"""
 
 
 def categories():
@@ -744,6 +755,11 @@ def find_tag(name):
     row = db().execute("""SELECT id FROM tag WHERE name = ?
                           UNION ALL SELECT tag_id FROM tag_alias WHERE alias = ? LIMIT 1""", (name, name)).fetchone()
     return row[0] if row else None
+
+
+def find_alias(name):
+    """The alias spelled like this (capitals don't matter), as it's stored, with its tag; or None."""
+    return db().execute("SELECT alias, tag_id FROM tag_alias WHERE alias = ?", (name,)).fetchone()
 
 
 def find_or_create_tag(c, name):
@@ -785,6 +801,14 @@ def suggest_tags(query, exclude=(), limit=8):
                       "category": tag["category_name"], "rank": rank})
     found.sort(key=lambda s: (s["rank"], len(s["name"]), s["name"].casefold()))
     found = found[:limit]
+    # The best match's parent comes straight after it (typing Danmei: Danmei, then Boys' Love).
+    parent_id = tags[found[0]["id"]]["parent_id"] if found else None
+    if parent_id and parent_id not in exclude:
+        parent = tags[parent_id]
+        found = [s for s in found if s["id"] != parent_id]
+        found.insert(1, {"id": parent_id, "name": parent["name"], "color": parent["color"], "alias": None,
+                         "category": parent["category_name"], "parent_of": found[0]["name"]})   # the tag's own name, even if an alias matched
+        found = found[:limit]
     if found and len(found) < limit:
         taken = {s["id"] for s in found} | set(exclude)
         for row in db().execute(f"""{TAG_SELECT} JOIN (
@@ -828,11 +852,19 @@ def work_tag_reasons(work_id):
         "SELECT tag_id, justification_md FROM work_tag WHERE work_id = ?", (work_id,))}
 
 
+def work_tag_aliases(work_id):
+    """The alias each tag was added by, spelled as the alias is now (e.g. {Boys' Love's id: 'M/M'})."""
+    return {r[0]: r[1] for r in db().execute(
+        "SELECT wt.tag_id, a.alias FROM work_tag wt JOIN tag_alias a ON a.alias = wt.alias WHERE wt.work_id = ?",
+        (work_id,))}
+
+
 def after_work_tags(work_id):
     """The browser's script asks for just the tags box back; without it, return to the page."""
     if request.headers.get("X-Partial"):
         return render_template("_work_tags.html", work=get_work_or_404(work_id), tags=work_tags(work_id),
-                               reasons=work_tag_reasons(work_id), categories=categories())
+                               reasons=work_tag_reasons(work_id), shown_as=work_tag_aliases(work_id),
+                               categories=categories())
     return redirect(url_for(".work_page", work_id=work_id) + "#tags")
 
 
@@ -857,7 +889,10 @@ def work_tag_add(work_id):
     if name:
         with db() as c:
             tag_id = find_or_create_tag(c, name)
-            c.execute("INSERT OR IGNORE INTO work_tag(work_id, tag_id) VALUES (?, ?)", (work_id, tag_id))
+            # Typed as an alias: the work remembers it, and shows e.g. "M/M (Boys' Love)".
+            alias = find_alias(name)
+            c.execute("INSERT OR IGNORE INTO work_tag(work_id, tag_id, alias) VALUES (?, ?, ?)",
+                      (work_id, tag_id, alias["alias"] if alias else None))
     return after_work_tags(work_id)
 
 
@@ -911,16 +946,55 @@ def tag_create():
 def tag_page(tag_id):
     tag = get_tag_or_404(tag_id)
     c = db()
-    works = c.execute("""SELECT w.id, w.title, i.file_path AS cover_path, f.label AS format_label, wt.justification_md
+    works = c.execute("""SELECT w.id, w.title, i.file_path AS cover_path, f.label AS format_label, wt.justification_md,
+                                a.alias
                          FROM work_tag wt JOIN work w ON w.id = wt.work_id
+                         LEFT JOIN tag_alias a ON a.alias = wt.alias
                          JOIN format f ON f.code = w.format_code
                          LEFT JOIN image i ON i.id = w.cover_image_id
                          WHERE wt.tag_id = ? ORDER BY w.title COLLATE NOCASE""", (tag_id,)).fetchall()
     aliases = [r[0] for r in c.execute("SELECT alias FROM tag_alias WHERE tag_id = ? ORDER BY alias COLLATE NOCASE", (tag_id,))]
     parent = get_tag_or_404(tag["parent_id"]) if tag["parent_id"] else None
     children = c.execute(f"{TAG_SELECT} WHERE t.parent_id = ? ORDER BY t.name COLLATE NOCASE", (tag_id,)).fetchall()
+    # The tags "Apply CW to all its children" would change: inside it at any depth, not CWs yet.
+    not_cw_inside = [r[0] for r in c.execute(
+        """SELECT t.name FROM tag_ancestor ta JOIN tag t ON t.id = ta.tag_id
+           WHERE ta.ancestor_id = ? AND ta.depth > 0 AND t.id NOT IN (SELECT tag_id FROM cw_setting)
+           ORDER BY t.name COLLATE NOCASE""", (tag_id,))]
+    # Tags it could go inside: any but itself and the tags already inside it (that would loop).
+    parent_choices = c.execute(f"""{TAG_SELECT} WHERE t.id NOT IN (SELECT tag_id FROM tag_ancestor WHERE ancestor_id = ?)
+                                   ORDER BY t.name COLLATE NOCASE""", (tag_id,)).fetchall()
+    library_count = c.execute(f"SELECT COUNT(*) FROM work w WHERE {TAGGED_OR_INSIDE}", (tag_id,)).fetchone()[0]
     return render_template("tag.html", tag=tag, works=works, aliases=aliases, parent=parent,
-                           children=children, categories=categories())
+                           children=children, not_cw_inside=not_cw_inside, parent_choices=parent_choices,
+                           library_count=library_count, categories=categories())
+
+
+def read_parent(tag):
+    """The tag named in the Inside box (a name or alias), or None when it's blank.
+    An unknown name, or one that would loop, keeps the current parent and says why."""
+    raw = clean_tag_name(request.form.get("parent"))
+    if not raw:
+        return None
+    parent_id = find_tag(raw)
+    if parent_id is None:
+        flash(f"There's no tag called “{raw}”, so Inside wasn't changed.")
+        return tag["parent_id"]
+    if db().execute("SELECT 1 FROM tag_ancestor WHERE tag_id = ? AND ancestor_id = ?", (parent_id, tag["id"])).fetchone():
+        flash(f"{tag['name']} can't go inside itself or a tag inside it, so Inside wasn't changed.")
+        return tag["parent_id"]
+    return parent_id
+
+
+def read_other_names(name):
+    """The Aliases boxes: tidied, without blanks, repeats or the tag's own name."""
+    seen, names = {name.casefold()}, []
+    for raw in request.form.getlist("alias"):
+        n = clean_tag_name(raw)
+        if n and n.casefold() not in seen:
+            seen.add(n.casefold())
+            names.append(n)
+    return names
 
 
 @bp.post("/tags/<int:tag_id>")
@@ -931,13 +1005,118 @@ def tag_update(tag_id):
     if other and other != tag_id:
         flash(f"There's already a tag or alias called “{name}”, so the name wasn't changed.")
         name = tag["name"]
+    parent_id = read_parent(tag) if "parent" in request.form else tag["parent_id"]
+    to_merge = []
     with db() as c:
         # Renaming a tag to one of its own aliases swaps them: the alias goes, since a name and alias can't match.
         c.execute("DELETE FROM tag_alias WHERE alias = ? AND tag_id = ?", (name, tag_id))
-        c.execute("UPDATE tag SET name = ?, category_id = ?, description_md = ? WHERE id = ?",
+        c.execute("UPDATE tag SET name = ?, category_id = ?, description_md = ?, parent_id = ? WHERE id = ?",
                   (name, read_category_id(request.form.get("category")),
-                   (request.form.get("description_md") or "").strip() or None, tag_id))
+                   (request.form.get("description_md") or "").strip() or None, parent_id, tag_id))
         set_cw(c, tag_id, request.form.get("cw") == "1")
+        if "alias" in request.form:
+            # Aliases still listed are kept as they are, so works added by them keep showing them.
+            # Removing one makes those works show just the tag's name.
+            current = {r[0].casefold(): r[0] for r in c.execute("SELECT alias FROM tag_alias WHERE tag_id = ?", (tag_id,))}
+            kept = set()
+            for n in read_other_names(name):
+                key = n.casefold()
+                if key in current:
+                    kept.add(key)
+                    if current[key] != n:   # only the capitals changed
+                        c.execute("UPDATE tag_alias SET alias = ? WHERE alias = ?", (n, current[key]))
+                    continue
+                owner = c.execute("SELECT id FROM tag WHERE name = ?", (n,)).fetchone()
+                if owner:   # a tag of its own: offer to merge it in, after saving the rest
+                    to_merge.append(owner[0])
+                elif find_tag(n):
+                    owner = get_tag_or_404(find_tag(n))
+                    flash(f"“{n}” is already an alias of {owner['name']}, so it wasn't added.")
+                else:
+                    c.execute("INSERT INTO tag_alias(alias, tag_id) VALUES (?, ?)", (n, tag_id))
+            for key, alias in current.items():
+                if key not in kept:
+                    c.execute("DELETE FROM tag_alias WHERE alias = ?", (alias,))
+    if to_merge:
+        return redirect(url_for(".tag_merge_page", tag_id=tag_id, other=to_merge))
+    return redirect(url_for(".tag_page", tag_id=tag_id))
+
+
+def merge_candidates(tag_id):
+    """The tags named by ?other= (or the form) that can be merged into this one."""
+    ids = {int(x) for x in request.values.getlist("other") if x.isdigit() and int(x) != tag_id}
+    return [t for t in (db().execute(f"{TAG_SELECT} WHERE t.id = ?", (i,)).fetchone() for i in sorted(ids)) if t]
+
+
+@bp.get("/tags/<int:tag_id>/merge")
+def tag_merge_page(tag_id):
+    tag = get_tag_or_404(tag_id)
+    others = merge_candidates(tag_id)
+    if not others:
+        return redirect(url_for(".tag_page", tag_id=tag_id))
+    c = db()
+    count = lambda sql, i: c.execute(sql, (i,)).fetchone()[0]
+    details = [{"tag": t,
+                "works": count("SELECT COUNT(*) FROM work_tag WHERE tag_id = ?", t["id"]),
+                "children": count("SELECT COUNT(*) FROM tag WHERE parent_id = ?", t["id"]),
+                "aliases": [r[0] for r in c.execute("SELECT alias FROM tag_alias WHERE tag_id = ? ORDER BY alias COLLATE NOCASE", (t["id"],))]}
+               for t in others]
+    return render_template("tag_merge.html", tag=tag, others=details)
+
+
+def merge_tag(c, target_id, other_id):
+    """Fold one tag into another: its works, images, aliases and child tags move over,
+    a CW, description or category fills in what the target lacks, and its name becomes an alias.
+    Its works keep showing the name they had, e.g. "Danmei (Boys' Love)"."""
+    target = c.execute("SELECT * FROM tag WHERE id = ?", (target_id,)).fetchone()
+    other = c.execute("SELECT * FROM tag WHERE id = ?", (other_id,)).fetchone()
+    moving = c.execute("SELECT work_id, justification_md, alias FROM work_tag WHERE tag_id = ?", (other_id,)).fetchall()
+    c.execute("INSERT OR IGNORE INTO image_tag(image_id, tag_id) SELECT image_id, ? FROM image_tag WHERE tag_id = ?",
+              (target_id, other_id))
+    c.execute("INSERT OR IGNORE INTO cw_setting(tag_id, blur, badge) SELECT ?, blur, badge FROM cw_setting WHERE tag_id = ?",
+              (target_id, other_id))
+    c.execute("UPDATE tag SET description_md = coalesce(description_md, ?), category_id = coalesce(category_id, ?) WHERE id = ?",
+              (other["description_md"], other["category_id"], target_id))
+    # Nesting: the target takes the other's place if it was inside it, and the other's children move
+    # inside the target, except one the target is itself inside, which moves up instead of looping.
+    if target["parent_id"] == other_id:
+        c.execute("UPDATE tag SET parent_id = ? WHERE id = ?", (other["parent_id"], target_id))
+    for (child_id,) in c.execute("SELECT id FROM tag WHERE parent_id = ? AND id <> ?", (other_id, target_id)).fetchall():
+        loops = c.execute("SELECT 1 FROM tag_ancestor WHERE tag_id = ? AND ancestor_id = ?", (target_id, child_id)).fetchone()
+        c.execute("UPDATE tag SET parent_id = ? WHERE id = ?", (other["parent_id"] if loops else target_id, child_id))
+    c.execute("UPDATE tag_alias SET tag_id = ? WHERE tag_id = ?", (target_id, other_id))
+    c.execute("DELETE FROM tag WHERE id = ?", (other_id,))
+    c.execute("INSERT INTO tag_alias(alias, tag_id) VALUES (?, ?)", (other["name"], target_id))
+    # A work with both keeps the target's reason and name, or takes the other's reason if it had none.
+    for work_id, reason, alias in moving:
+        c.execute("UPDATE work_tag SET justification_md = coalesce(justification_md, ?) WHERE work_id = ? AND tag_id = ?",
+                  (reason, work_id, target_id))
+        c.execute("INSERT OR IGNORE INTO work_tag(work_id, tag_id, justification_md, alias) VALUES (?, ?, ?, ?)",
+                  (work_id, target_id, reason, alias or other["name"]))
+
+
+@bp.post("/tags/<int:tag_id>/merge")
+def tag_merge(tag_id):
+    tag = get_tag_or_404(tag_id)
+    others = merge_candidates(tag_id)
+    with db() as c:
+        for t in others:
+            merge_tag(c, tag_id, t["id"])
+    if others:
+        flash(f"Merged {', '.join(t['name'] for t in others)} into {tag['name']}.")
+    return redirect(url_for(".tag_page", tag_id=tag_id))
+
+
+@bp.post("/tags/<int:tag_id>/cw-children")
+def tag_cw_children(tag_id):
+    """Mark every tag inside a CW tag, at any depth, as a CW too, with the parent's blur and badge."""
+    tag = get_tag_or_404(tag_id)
+    if tag["is_cw"]:
+        with db() as c:
+            n = c.execute("""INSERT OR IGNORE INTO cw_setting(tag_id, blur, badge)
+                             SELECT ta.tag_id, cs.blur, cs.badge FROM tag_ancestor ta JOIN cw_setting cs ON cs.tag_id = ?
+                             WHERE ta.ancestor_id = ? AND ta.depth > 0""", (tag_id, tag_id)).rowcount
+        flash(f"Marked {n} {'tag' if n == 1 else 'tags'} inside {tag['name']} as content warnings.")
     return redirect(url_for(".tag_page", tag_id=tag_id))
 
 

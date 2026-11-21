@@ -336,7 +336,7 @@ def test_parent_cycles_blocked():
     db.execute("UPDATE tag SET parent_id = NULL WHERE id = 103")          # un-nesting is fine
     db.execute("UPDATE tag SET parent_id = 103 WHERE id = 101")           # now no loop, allowed
 
-def test_cw_inherited_from_parent_for_images_and_works():
+def test_cw_for_images_and_works_comes_from_their_own_tags_only():
     db = new_db()
     vid = one(db, "SELECT id FROM tag WHERE name = 'Violence'")
     db.execute("INSERT INTO tag(id, name, parent_id) VALUES (50, 'Gore', ?)", (vid,))
@@ -344,9 +344,15 @@ def test_cw_inherited_from_parent_for_images_and_works():
     db.execute("INSERT INTO image(id, file_path, sha256, mime_type) VALUES (1, 'images/a.png', 'h', 'image/png')")
     db.execute("INSERT INTO image_tag VALUES (1, 51)")
     db.execute("INSERT INTO work_tag(work_id, tag_id) VALUES (1, 51)")
-    assert db.execute("SELECT image_id, blur, badge, cw_tags FROM image_cw").fetchall() == [(1, 1, 1, "Violence")]
-    assert db.execute("SELECT work_id, cw_tags FROM work_cw").fetchall() == [(1, "Violence")]
-    db.execute("UPDATE cw_setting SET blur = 0 WHERE tag_id = ?", (vid,))
+    # a parent's CW isn't inherited
+    assert db.execute("SELECT * FROM image_cw").fetchall() == [] and db.execute("SELECT * FROM work_cw").fetchall() == []
+    db.execute("INSERT INTO cw_setting(tag_id, blur) VALUES (51, 1)")
+    db.execute("INSERT INTO image_tag VALUES (1, ?)", (vid,))
+    db.execute("INSERT INTO work_tag(work_id, tag_id) VALUES (1, ?)", (vid,))
+    assert db.execute("SELECT image_id, blur, badge, cw_tags FROM image_cw").fetchall() in (
+        [(1, 1, 1, "Violence,Body horror")], [(1, 1, 1, "Body horror,Violence")])
+    assert db.execute("SELECT work_id FROM work_cw").fetchall() == [(1,)]
+    db.execute("UPDATE cw_setting SET blur = 0")
     assert one(db, "SELECT blur FROM image_cw WHERE image_id = 1") == 0
 
 def test_untagged_image_has_no_cw():
@@ -356,11 +362,28 @@ def test_untagged_image_has_no_cw():
     db.execute("INSERT INTO image_tag VALUES (1, 10)")
     assert db.execute("SELECT * FROM image_cw").fetchall() == []
 
+def test_work_remembers_the_alias_it_was_tagged_by():
+    db = new_db()
+    db.execute("INSERT INTO tag(id, name) VALUES (10, 'Boys'' Love'), (11, 'Fluff')")
+    db.execute("INSERT INTO tag_alias VALUES ('M/M', 10), ('Softness', 11)")
+    db.execute("INSERT INTO work_tag(work_id, tag_id, alias) VALUES (1, 10, 'm/m')")   # capitals don't matter
+    assert rejects(db, "INSERT INTO work_tag(work_id, tag_id, alias) VALUES (2, 10, 'Softness')")   # another tag's alias
+    assert rejects(db, "INSERT INTO work_tag(work_id, tag_id, alias) VALUES (2, 10, 'Nope')")       # not an alias
+    assert rejects(db, "UPDATE work_tag SET alias = 'Softness' WHERE work_id = 1")
+    db.execute("UPDATE tag_alias SET alias = 'MM' WHERE alias = 'M/M'")           # renaming follows through
+    assert one(db, "SELECT alias FROM work_tag WHERE work_id = 1") == "MM"
+    db.execute("UPDATE tag_alias SET tag_id = 11 WHERE alias = 'MM'")             # moved to another tag: no longer shown
+    assert one(db, "SELECT alias FROM work_tag WHERE work_id = 1") is None
+    db.execute("UPDATE tag_alias SET tag_id = 10 WHERE alias = 'MM'")
+    db.execute("UPDATE work_tag SET alias = 'MM' WHERE work_id = 1")
+    db.execute("DELETE FROM tag_alias WHERE alias = 'MM'")                        # deleted: the work keeps the tag
+    assert db.execute("SELECT tag_id, alias FROM work_tag WHERE work_id = 1").fetchall() == [(10, None)]
+
 def test_tag_justification():
     db = new_db()
     db.execute("INSERT INTO tag(id, name) VALUES (10, 'Enemies to Lovers')")
-    db.execute("INSERT INTO work_tag VALUES (1, 10, 'the side couple in Ch. 64 begin as rivals')")
-    assert rejects(db, "INSERT INTO work_tag VALUES (1, 10, 'again')")
+    db.execute("INSERT INTO work_tag(work_id, tag_id, justification_md) VALUES (1, 10, 'the side couple in Ch. 64 begin as rivals')")
+    assert rejects(db, "INSERT INTO work_tag(work_id, tag_id, justification_md) VALUES (1, 10, 'again')")
 
 # ---------------------------------------------------------------- lists
 
@@ -405,7 +428,7 @@ def test_integrity():
     db = new_db()
     assert one(db, "PRAGMA integrity_check") == "ok"
     assert db.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert one(db, "PRAGMA user_version") == 5
+    assert one(db, "PRAGMA user_version") == 7
 
 
 if __name__ == "__main__":

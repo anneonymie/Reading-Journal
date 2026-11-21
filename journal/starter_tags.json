@@ -250,5 +250,11 @@
     {"name": "Web Novel", "cw": false, "aliases": [], "children": []},
     {"name": "Fanfiction", "cw": false, "aliases": [], "children": []},
     {"name": "Drabble", "cw": false, "aliases": [], "children": []}
+  ]},
+  {"name": "Original Language", "color": "#3d7f86", "description": "The language it was first published in.", "tags": [
+    {"name": "Japanese", "cw": false, "aliases": [], "children": []},
+    {"name": "Chinese", "cw": false, "aliases": [], "children": []},
+    {"name": "Korean", "cw": false, "aliases": [], "children": []},
+    {"name": "English", "cw": false, "aliases": [], "children": []}
   ]}
 ]}

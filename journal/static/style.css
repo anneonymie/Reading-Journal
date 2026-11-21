@@ -307,6 +307,7 @@ legend { font-family: var(--display); font-weight: 700; padding: 0 .4rem; }
 a.chip:hover, summary.chip:hover { background: color-mix(in srgb, var(--cat) 28%, var(--surface)); }
 .chip.cw::before { content: "⚠"; font-size: .8em; color: var(--danger); }
 .has-reason { color: var(--ink-soft); margin-left: .1rem; }
+.alias-of { opacity: .75; font-size: .9em; }
 button.small { min-height: 2rem; padding: .2rem .8rem; font-size: .9rem; }
 .danger-text { color: var(--danger) !important; }
 .panel-title { font-size: 1.05rem; margin: 0; padding: .6rem 0; }
@@ -360,6 +361,9 @@ button.small { min-height: 2rem; padding: .2rem .8rem; font-size: .9rem; }
 .cw-badge { font-size: .85rem; font-weight: 600; color: var(--danger); }
 .cw-badge::before { content: "⚠ "; }
 .tag-facts { margin-top: 1rem; }
+.cw-children { display: flex; flex-wrap: wrap; gap: .5rem .75rem; align-items: center; margin-top: 1rem; }
+.merge-list { list-style: none; margin: 1rem 0; padding: 0; display: flex; flex-direction: column; gap: .6rem; }
+.merge-list li { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 .tag-works-section { margin-top: 2rem; }
 .tag-works { list-style: none; margin: .5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .9rem; }
 .tag-works li { display: flex; gap: .9rem; align-items: flex-start; }

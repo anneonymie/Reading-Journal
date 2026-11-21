@@ -3,6 +3,17 @@ Updates to the Reading Journal app. The current app version appears at the botto
 
 ## Unreleased
 
+- Tag pages: aliases can be added and removed in Edit Tag. Typing an alias anywhere finds its tag.
+- Tag pages: adding an alias that is already a tag of its own offers to merge the two. Works, aliases and the tags inside move over, and a content warning carries across. Merged works keep showing the name they had.
+- Work pages: a tag added by an alias shows both names, like "M/M (Boys' Love)". Its pop-up links to the works tagged with that alias.
+- Tag suggestions: an alias match shows "aka" and the tag's name, and adds the tag by that alias. A child tag's parent is suggested straight after it.
+- Library: filtering by an alias shows only the works tagged with that alias. Aliases on a tag's page link to these lists.
+- New starter category, Original Language: Japanese, Chinese, Korean and English.
+- Tag pages: a new Inside box in Edit Tag puts a tag inside another one. Putting a tag inside a content warning asks whether to mark it as one too.
+- Tag pages: content warnings no longer pass automatically to the tags inside them. A content warning's page has an "Apply CW to all its children" button, which asks first and lists the tags it will change.
+- Library: filtering by a tag also shows works tagged with any tag inside it.
+- Database now level 7. The first time this version starts, it saves a backup in `journal-data/backups` before updating.
+
 ## 0.5.0 (2026-11-19)
 
 - Tags! Works can be tagged from the Tags box on their page, by picking a suggestion or creating a new tag with Enter. Suggestions include other names for a tag (typing "yaoi" finds Boys' Love), allow for typos, and offer tags often used together.

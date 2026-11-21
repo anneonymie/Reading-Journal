@@ -2,19 +2,20 @@
 {% from "_macros.html" import cover, progress_text, tag_chip %}
 {% block title %}Library | Reading Journal{% endblock %}
 {% block content %}
-{% set tag_id = tag.id if tag else None %}
+{# keep: the tag or alias filter, carried by every status tab #}
+{% set label = (alias ~ " (" ~ tag.name ~ ")") if alias else (tag.name if tag else "") %}
 <div class="library-head">
   <h1>Library</h1>
   {% if tag %}
   <p class="library-filter">
-    Tagged {{ tag_chip(tag) }}
+    Tagged {% if alias %}{{ alias }} ({{ tag_chip(tag) }}){% else %}{{ tag_chip(tag) }}{% endif %}{% if has_inside %} or a tag inside it{% endif %}
     <a class="clear-filter" href="{{ url_for('journal.library', status=status) }}" aria-label="Show all works, not just this tag">× Clear</a>
   </p>
   {% endif %}
   <nav class="tabs" aria-label="Filter by status">
-    <a href="{{ url_for('journal.library', tag=tag_id) }}" {% if not status %}aria-current="page"{% endif %}>All <span class="count">{{ total }}</span></a>
+    <a href="{{ url_for('journal.library', **keep) }}" {% if not status %}aria-current="page"{% endif %}>All <span class="count">{{ total }}</span></a>
     {% for s in statuses %}
-      <a href="{{ url_for('journal.library', status=s.code, tag=tag_id) }}" {% if status == s.code %}aria-current="page"{% endif %}>{{ s.label }} <span class="count">{{ counts.get(s.code, 0) }}</span></a>
+      <a href="{{ url_for('journal.library', status=s.code, **keep) }}" {% if status == s.code %}aria-current="page"{% endif %}>{{ s.label }} <span class="count">{{ counts.get(s.code, 0) }}</span></a>
     {% endfor %}
   </nav>
 </div>
@@ -35,9 +36,9 @@
   {% endfor %}
 </ul>
 {% elif tag and not total %}
-<p class="empty">No works are tagged {{ tag.name }} yet.</p>
+<p class="empty">No works are tagged {{ label }}{% if has_inside %} or a tag inside it{% endif %} yet.</p>
 {% elif total %}
-<p class="empty">Nothing{% if tag %} tagged {{ tag.name }}{% endif %} is marked {{ (statuses|selectattr('code', 'equalto', status)|first).label }} right now.</p>
+<p class="empty">Nothing{% if tag %} tagged {{ label }}{% endif %} is marked {{ (statuses|selectattr('code', 'equalto', status)|first).label }} right now.</p>
 {% else %}
 <div class="empty">
   <p>You don't have any works in your journal. Use the Add Work button to add one.</p>

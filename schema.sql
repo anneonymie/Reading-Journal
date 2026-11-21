@@ -452,15 +452,42 @@ CREATE TABLE cw_setting (
     is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1))
 ) STRICT;
 
--- Per-work tagging with an optional justification
+-- Per-work tagging with an optional justification, and the alias it was added by
 CREATE TABLE work_tag (
     work_id          INTEGER NOT NULL REFERENCES work(id) ON DELETE CASCADE,
     tag_id           INTEGER NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
     justification_md TEXT,                 -- "the side couple in Ch. 64 begin as rivals"
+    -- e.g. 'M/M' on Boys' Love shows as "M/M (Boys' Love)"; deleting the alias shows just the tag
+    alias            TEXT COLLATE NOCASE REFERENCES tag_alias(alias) ON DELETE SET NULL ON UPDATE CASCADE,
     PRIMARY KEY (work_id, tag_id)
 ) STRICT;
 
 CREATE INDEX work_tag_tag ON work_tag(tag_id);
+CREATE INDEX work_tag_alias ON work_tag(alias);
+
+-- The alias on a work must be one of that tag's own aliases
+CREATE TRIGGER work_tag_alias_matches_ins
+BEFORE INSERT ON work_tag
+WHEN NEW.alias IS NOT NULL
+ AND NOT EXISTS (SELECT 1 FROM tag_alias WHERE alias = NEW.alias AND tag_id = NEW.tag_id)
+BEGIN
+    SELECT RAISE(ABORT, 'that alias belongs to a different tag');
+END;
+
+CREATE TRIGGER work_tag_alias_matches_upd
+BEFORE UPDATE OF alias, tag_id ON work_tag
+WHEN NEW.alias IS NOT NULL
+ AND NOT EXISTS (SELECT 1 FROM tag_alias WHERE alias = NEW.alias AND tag_id = NEW.tag_id)
+BEGIN
+    SELECT RAISE(ABORT, 'that alias belongs to a different tag');
+END;
+
+-- An alias moved to another tag stops showing on works that keep the old tag
+CREATE TRIGGER tag_alias_moved
+AFTER UPDATE OF tag_id ON tag_alias
+BEGIN
+    UPDATE work_tag SET alias = NULL WHERE alias = NEW.alias AND tag_id <> NEW.tag_id;
+END;
 
 CREATE TABLE image_tag (
     image_id INTEGER NOT NULL REFERENCES image(id) ON DELETE CASCADE,
@@ -470,7 +497,8 @@ CREATE TABLE image_tag (
 
 CREATE INDEX image_tag_tag ON image_tag(tag_id);
 
--- CW display for any image: blur/badge if any of its tags, or their parents, is a CW.
+-- CW display for any image: blur/badge if any of its tags is a CW. A parent's CW isn't
+-- inherited; the app's "Apply CW to all its children" marks the children instead.
 -- Every screen that shows an image reads this, so the setting is consistent everywhere.
 CREATE VIEW image_cw AS
 SELECT it.image_id,
@@ -478,9 +506,8 @@ SELECT it.image_id,
        MAX(cs.badge) AS badge,
        group_concat(DISTINCT t.name) AS cw_tags
 FROM image_tag it
-JOIN tag_ancestor ta ON ta.tag_id = it.tag_id
-JOIN cw_setting cs   ON cs.tag_id = ta.ancestor_id
-JOIN tag t           ON t.id = ta.ancestor_id
+JOIN cw_setting cs ON cs.tag_id = it.tag_id
+JOIN tag t         ON t.id = it.tag_id
 GROUP BY it.image_id;
 
 -- Same for works (CW badges on library cards and work pages)
@@ -490,9 +517,8 @@ SELECT wt.work_id,
        MAX(cs.badge) AS badge,
        group_concat(DISTINCT t.name) AS cw_tags
 FROM work_tag wt
-JOIN tag_ancestor ta ON ta.tag_id = wt.tag_id
-JOIN cw_setting cs   ON cs.tag_id = ta.ancestor_id
-JOIN tag t           ON t.id = ta.ancestor_id
+JOIN cw_setting cs ON cs.tag_id = wt.tag_id
+JOIN tag t         ON t.id = wt.tag_id
 GROUP BY wt.work_id;
 
 -- Tag search index: names and aliases, trigram for fuzzy/substring matching
@@ -658,4 +684,4 @@ CREATE TABLE app_setting (
 ) STRICT;
 
 -- Schema version, for future migrations
-PRAGMA user_version = 5;
+PRAGMA user_version = 7;

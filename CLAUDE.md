@@ -7,7 +7,7 @@ A self-hosted reading journal for manga, novels and fanfic, replacing a Discord 
 - `002.5 Journaling systems.md`: the requirements. Source of truth for what the app should do. Ask before editing it.
 - `002.6 Schema.md`: plain-English description of the schema and which rules are enforced by the database vs the app. Keep it in sync with `schema.sql`.
 - `schema.sql`: the runnable schema (SQLite 3.43+, STRICT tables, FTS5).
-- `old_schemas/`: each earlier release's `schema.sql`, used by tests to upgrade a real old database. Never edit these.
+- `old_schemas/`: each earlier level's `schema.sql`, used by tests to upgrade a real old database. Never edit these.
 - `test_schema.py`, `test_app.py`: tests for every rule in the requirements.
 - `seed.py`: builds sample data in `journal-demo/`.
 - `README.md`: user-facing instructions. Written for a non-programmer; keep it that way.
@@ -21,7 +21,7 @@ Flask app served by waitress. Server-rendered Jinja templates; plain SQL through
 - `run.py`: entry point. Reads `JOURNAL_DATA`, `JOURNAL_HOST`, `JOURNAL_PORT` and starts waitress. `start.bat` sets up `.venv` and runs it.
 - `journal/__init__.py`: `VERSION` (the release version, shown in the footer) and `create_app(data_dir)`, which creates the data folder, runs `init_db` and closes the per-request connection on teardown.
 - `journal/db.py`: `connect()` (the only way to open a connection; turns on foreign keys), `init_db()` (creates, upgrades or refuses the database), `MIGRATIONS` (upgrade steps), `load_starter_tags()`, `SetupError`.
-- `journal/starter_tags.json`: the starter tag categories and tags, loaded into a new journal and by the version 5 upgrade.
+- `journal/starter_tags.json`: the starter tag categories and tags, loaded into a new journal and by the version 5 upgrade (the version 7 upgrade adds only Original Language).
 - `journal/views.py`: every route, in one blueprint `bp`, plus form parsing and validation. Get the request's connection with `db()`. `/media/<path>` serves images from the data folder.
 - `journal/images.py`: `store_image()`. Validates uploads with Pillow and stores them as `images/<sha[:2]>/<sha>.<ext>`, deduped by hash.
 - `journal/text.py`: Markdown rendering (raw HTML disabled), UTC timestamp helpers, number formatting.
@@ -39,6 +39,7 @@ Flask app served by waitress. Server-rendered Jinja templates; plain SQL through
 
 - Run both test files after any change to the schema or app. Add or update a test for every new rule.
 - When the schema changes: first save the current `schema.sql` as `old_schemas/schema_v<current version>.sql` (copy it byte-for-byte from the last release tag, e.g. `cmd /c "git cat-file blob v0.1.0:schema.sql > old_schemas\schema_v2.sql"`; PowerShell redirection re-encodes text). Then update `002.6 Schema.md`, bump `SCHEMA_VERSION` in `journal/db.py` and `PRAGMA user_version` in `schema.sql` together, and add a `MIGRATIONS` step from the previous version, with a test that upgrades a database made by the old schema. Existing databases need a migration, not a rebuild. On startup `init_db` backs up `journal.db` to `backups/` before migrating, runs all steps in one transaction, and refuses databases newer than `SCHEMA_VERSION`; keep those guarantees and their tests.
+- Never change an upgrade step once it's in the working tree, released or not: my real journal may already have run it. Every schema change gets a new level. If the previous level was never released, save its `old_schemas/` copy by rebuilding it from that step, since there's no tag to copy from.
 - Every user-facing change gets a line under "Unreleased" in `CHANGELOG.md`, in plain language: what changed in the app, not how the code does it. Changelog style, like Discord's change notes:
   - Keep the focus on the app. The subject is the feature ("Content warnings are listed separately"), or the line starts with a past-tense verb and no subject ("Added a Tags page", "Fixed images appearing twice"). Never "you", "your", "I" or "me", and no instructions like "Click a tag to...".
   - Start with the area when it helps: "Work pages:", "Edit Journal Entry:", "Add/Edit Work:".

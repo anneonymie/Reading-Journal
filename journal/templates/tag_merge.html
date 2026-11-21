@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_macros.html" import tag_chip %}
+{% block title %}Merge tags | {{ tag.name }} | Reading Journal{% endblock %}
+{% block content %}
+<div class="work">
+  <p class="crumb"><a href="{{ url_for('journal.tags_page') }}">Tags</a> › <a href="{{ url_for('journal.tag_page', tag_id=tag.id) }}">{{ tag.name }}</a></p>
+  <h1>Merge into {{ tag.name }}?</h1>
+  <p>{{ 'This name is' if others|length == 1 else 'These names are' }} already {{ 'a tag' if others|length == 1 else 'tags' }} of {{ 'its' if others|length == 1 else 'their' }} own. The rest of your changes were saved.</p>
+  <ul class="merge-list">
+    {% for o in others %}
+    <li>
+      {{ tag_chip(o.tag) }}
+      <span class="hint">
+        {{ o.works }} {{ 'work' if o.works == 1 else 'works' }}
+        {%- if o.children %}, {{ o.children }} {{ 'tag' if o.children == 1 else 'tags' }} inside it{% endif %}
+        {%- if o.aliases %}, aliases: {{ o.aliases|join(", ") }}{% endif %}
+        {%- if o.tag.is_cw %}, content warning{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  <p>Merging moves {{ 'its' if others|length == 1 else 'their' }} works, aliases and the tags inside {{ 'it' if others|length == 1 else 'them' }} to {{ tag.name }}, and {{ 'its name becomes an alias' if others|length == 1 else 'their names become aliases' }}. Works keep showing the name they had, like “{{ others[0].tag.name }} ({{ tag.name }})”. If any of them is a content warning, {{ tag.name }} becomes one. A description or category fills in only where {{ tag.name }} has none.</p>
+  <form method="post" action="{{ url_for('journal.tag_merge', tag_id=tag.id) }}" class="actions">
+    {% for o in others %}<input type="hidden" name="other" value="{{ o.tag.id }}">{% endfor %}
+    <button type="submit">Merge into {{ tag.name }}</button>
+    <a href="{{ url_for('journal.tag_page', tag_id=tag.id) }}">Don't merge</a>
+  </form>
+</div>
+{% endblock %}
